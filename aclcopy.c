@@ -169,9 +169,17 @@ compare_acl(acl_t sa,
         switch (s_tt) {
         case ACL_USER:
             vp = acl_get_qualifier(s_e);
-            s_uid = vp ? *(uid_t *)vp : -1;
+	    if (vp) {
+		s_uid = *(uid_t *)vp;
+		acl_free(vp);
+	    } else
+		s_uid = -1;
             vp = acl_get_qualifier(d_e);
-            d_uid = vp ? *(uid_t *)vp : -1;
+	    if (vp) {
+		d_uid = *(uid_t *)vp;
+		acl_free(vp);
+	    } else
+		d_uid = -1;
             d = s_uid-d_uid;
             if (d)
                 return d;
@@ -258,6 +266,7 @@ is_valid_name(const char *s) {
 
 typedef struct {
     int fd;
+    int flags;
     struct stat sb;
     char *path;
 } XFD;
@@ -294,6 +303,25 @@ strdupcat(const char *base,
 }
 
 
+int
+xfd_reopen(XFD *xp,
+	   int flags) {
+    int fd;
+
+
+    if (xp->flags == flags)
+	return 0;
+    
+    fd = openat(xp->fd, "", O_EMPTY_PATH|flags);
+
+    if (fd < 0)
+	return -1;
+
+    xp->flags = flags;
+    return dup2(fd, xp->fd);
+}
+
+
 XFD *
 xfd_openat(XFD *dxp,
 	   const char *name) {
@@ -302,8 +330,12 @@ xfd_openat(XFD *dxp,
     xp = malloc(sizeof(*xp));
     if (!xp)
 	return NULL;
-    
-    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, O_RDONLY|O_NOFOLLOW|O_NONBLOCK);
+
+#ifdef O_PATH
+    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_PATH);
+#else
+    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_RDONLY|O_NOFOLLOW|O_NONBLOCK);
+#endif
     if (xp->fd < 0) {
 	free(xp);
 	return NULL;
@@ -430,6 +462,11 @@ copy_acl(XFD *s_dir,
         off_t basep = 0;
 
 
+	if (xfd_reopen(s_fd, O_RDONLY|O_DIRECTORY) < 0) {
+	    perror_xfd_exit(d_dir, d_name, "Reopening as Directory");
+	    exit(1);
+	}
+	
         while ((nr = getdirentries(s_fd->fd, buf, sizeof(buf), &basep)) > 0) {
             char *ptr = buf;
 
@@ -453,6 +490,11 @@ copy_acl(XFD *s_dir,
         /* Both have ACLs */
         if (f_force || compare_acl(s_acl, d_acl) != 0) {
             if (f_update) {
+		if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
+		    perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
+		    exit(1);
+		}
+		
                 if (acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4) < 0) {
 		    perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
                 } else {
@@ -474,6 +516,11 @@ copy_acl(XFD *s_dir,
         /* Source have ACL, Dest not */
 
         if (f_update) {
+	    if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
+		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
+		exit(1);
+	    }
+	    
             if (acl_set_fd_np(d_fd->fd, d_acl, ACL_TYPE_NFS4) < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
@@ -498,6 +545,11 @@ copy_acl(XFD *s_dir,
         t_acl = acl_strip_np(d_acl, 0);
 
         if (f_update) {
+	    if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
+		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
+		exit(1);
+	    }
+	    
             if (acl_set_fd_np(d_fd->fd, t_acl, ACL_TYPE_NFS4) < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
