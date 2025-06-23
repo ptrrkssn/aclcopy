@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <errno.h>
 #include <string.h>
 #include <dirent.h>
@@ -58,6 +59,7 @@ int f_update = 1;
 int f_recurse = 0;
 int f_force = 0;
 int f_ignore = 0;
+int f_debug = 0;
 
 
 acl_perm_t perms[] = {
@@ -89,8 +91,13 @@ compare_permset(acl_permset_t a,
     for (i = 0; i < sizeof(perms)/sizeof(perms[0]); i++) {
         int d, ap, bp;
 
+#ifdef HAVE_ACL_GET_PERM_NP
+        ap = acl_get_perm_np(a, perms[i]);
+        bp = acl_get_perm_np(b, perms[i]);
+#else
         ap = acl_get_perm(a, perms[i]);
         bp = acl_get_perm(b, perms[i]);
+#endif
         d = ap-bp;
         if (d)
             return d;
@@ -161,7 +168,9 @@ compare_acl(acl_t sa,
             if (vp) {
                 d_gid = *(gid_t *) vp;
                 acl_free(vp);
-            }
+            } else
+		d_gid = -1;
+	    
             d = s_gid-d_gid;
             if (d)
                 return d;
@@ -227,118 +236,227 @@ is_valid_name(const char *s) {
     return 1;
 }
 
+typedef struct {
+    int fd;
+    struct stat sb;
+    char *path;
+} XFD;
+
+
+char *
+strdupcat(const char *base,
+	  ...) {
+    va_list ap;
+    char *result, *rp, *cp;
+    size_t len;
+
+
+    len = strlen(base);
+    va_start(ap, base);
+    while ((cp = va_arg(ap, char *)) != NULL) {
+	len += strlen(cp);
+    }
+    va_end(ap);
+
+    va_start(ap, base);
+    
+    rp = result = malloc(len+1);
+    while (*base)
+	*rp++ = *base++;
+    
+    while ((cp = va_arg(ap, char *)) != NULL) {
+	while (*cp)
+	    *rp++ = *cp++;
+    }
+    va_end(ap);
+    *rp = '\0';
+    return result;
+}
+
+
+XFD *
+xfd_openat(XFD *dxp,
+	   const char *name) {
+    XFD *xp;
+
+    xp = malloc(sizeof(*xp));
+    if (!xp)
+	return NULL;
+    
+    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, O_RDONLY);
+    if (xp->fd < 0) {
+	free(xp);
+	return NULL;
+    }
+
+    if (fstat(xp->fd, &xp->sb) < 0) {
+	close(xp->fd);
+	free(xp);
+	return NULL;
+    }
+    
+    if (name[0] == '/' || !dxp)
+	xp->path = strdupcat(name, NULL);
+    else {
+	if (name[0] == '.' && name[1] == '/')
+	    name += 2;
+	if (dxp)
+	    xp->path = strdupcat(dxp->path, "/", name, NULL);
+    }
+    
+    if (!xp->path) {
+	close(xp->fd);
+	free(xp);
+	return NULL;
+    }
+    
+    return xp;
+}
+
+
+void
+xfd_close(XFD *xp) {
+    free(xp->path);
+    close(xp->fd);
+    free(xp);
+}
+
+
 int
-copy_acl(int s_dirfd,
-         const char *s_name,
-         int d_dirfd,
+print_xfd2path(FILE *fp,
+	       XFD *dir,
+	       const char *path) {
+    if (path[0] == '/')
+	return fputs(path, fp);
+
+    while (path[0] == '.' && path[1] == '/')
+	path += 2;
+    
+    if (dir)
+	return fprintf(fp, "%s/%s", dir->path, path);;
+
+    return fputs(path, fp);
+}
+
+
+void
+perror_xfd_exit(XFD *dir,
+		const char *path,
+		const char *msg) {
+    fprintf(stderr, "%s: Error: ", argv0);
+    print_xfd2path(stderr, dir, path);
+    fprintf(stderr, "%s: %s\n",
+	    msg, strerror(errno));
+    if (f_ignore)
+	exit(1);
+}
+
+int
+copy_acl(XFD *s_dir,
+	 const char *s_name,
+         XFD *d_dir,
          const char *d_name,
          int level) {
-    struct stat s_sb, d_sb;
     acl_t s_acl, d_acl;
-    int s_fd, d_fd;
+    XFD *s_fd, *d_fd;
+	
 
 
-    if (f_verbose)
-        printf("%*s%s -> %s\n", level, "", s_name, d_name);
-
-    s_fd = openat(s_dirfd, s_name, O_PATH);
-    if (s_fd < 0) {
-        fprintf(stderr, "%s: Error: %s: open: %s\n",
-                argv0, s_name, strerror(errno));
+    if (f_debug) {
+	fprintf(stderr, "%*s", level, "");
+	print_xfd2path(stderr, s_dir, s_name);
+	fputs(" -> ", stderr);
+	print_xfd2path(stderr, d_dir, d_name);
+	putc('\n', stderr);
+    }
+    
+    s_fd = xfd_openat(s_dir, s_name);
+    if (!s_fd) {
+        fprintf(stderr, "%s: Error: ", argv0);
+	print_xfd2path(stderr, s_dir, s_name);
+	fprintf(stderr, ": open: %s\n", strerror(errno));
         exit(1);
     }
 
-    d_fd = openat(d_dirfd, d_name, O_PATH);
-    if (d_fd < 0) {
-        fprintf(stderr, "%s: Error: %s: open: %s\n",
-                argv0, d_name, strerror(errno));
+    d_fd = xfd_openat(d_dir, d_name);
+    if (!d_fd) {
+        fprintf(stderr, "%s: Error: ", argv0);
+	print_xfd2path(stderr, d_dir, d_name);
+	fprintf(stderr, ": open: %s\n", strerror(errno));
         exit(1);
     }
 
-    if (fstat(s_fd, &s_sb) < 0) {
-        fprintf(stderr, "%s: Error: %s: %s\n",
-                argv0, s_name, strerror(errno));
+    if ((s_fd->sb.st_mode & S_IFMT) != (d_fd->sb.st_mode & S_IFMT)) {
+        fprintf(stderr, "%s: Error: ", argv0);
+	print_xfd2path(stderr, s_dir, s_name);
+	fputs(" -> ", stderr);
+	print_xfd2path(stderr, d_dir, d_name);
+	fprintf(stderr, ": Different object types\n");
         exit(1);
     }
 
-    if (fstat(d_fd, &d_sb) < 0) {
-        fprintf(stderr, "%s: Error: %s: %s\n",
-                argv0, d_name, strerror(errno));
-        exit(1);
-    }
-
-    if ((s_sb.st_mode & S_IFMT) != (d_sb.st_mode & S_IFMT)) {
-        fprintf(stderr, "%s: Error: %s / %s: Different object types\n",
-                argv0, s_name, d_name);
-        exit(1);
-    }
-
-    if (S_ISDIR(s_sb.st_mode) && f_recurse) {
+    if (S_ISDIR(s_fd->sb.st_mode) && f_recurse) {
         struct dirent *dp;
         char buf[8192];
         ssize_t nr;
         off_t basep = 0;
-        int fd;
 
 
-        fd = openat(s_fd, "", O_RDONLY|O_DIRECTORY|O_EMPTY_PATH);
-        if (fd < 0) {
-            fprintf(stderr, "%s: Error: Unable to reopen source as dir\n", argv0);
-            exit(1);
-        }
-
-        while ((nr = getdirentries(fd, buf, sizeof(buf), &basep)) > 0) {
+        while ((nr = getdirentries(s_fd->fd, buf, sizeof(buf), &basep)) > 0) {
             char *ptr = buf;
 
             while (ptr < buf+nr) {
                 dp = (struct dirent *) ptr;
                 if (is_valid_name(dp->d_name)) {
-                    int rc;
-
-                    rc = copy_acl(s_fd, dp->d_name, d_fd, dp->d_name, level+1);
+                    copy_acl(s_fd, dp->d_name, d_fd, dp->d_name, level+1);
                 }
                 ptr += dp->d_reclen;
             }
         }
-        close(fd);
     }
 
 
     /* Update the ACL */
 
-    s_acl = acl_get_fd_np(s_fd, ACL_TYPE_NFS4);
-    d_acl = acl_get_fd_np(d_fd, ACL_TYPE_NFS4);
+    s_acl = acl_get_fd_np(s_fd->fd, ACL_TYPE_NFS4);
+    d_acl = acl_get_fd_np(d_fd->fd, ACL_TYPE_NFS4);
 
     if (s_acl != NULL && d_acl != NULL) {
         /* Both have ACLs */
         if (f_force || compare_acl(s_acl, d_acl) != 0) {
             if (f_update) {
-                if (acl_set_fd_np(d_fd, d_acl, ACL_TYPE_NFS4) < 0) {
-                    fprintf(stderr, "%s: Error: %s: acl_set_fd_np: %s\n",
-                            argv0, d_name, strerror(errno));
-                    exit(1);
-                }
-                if (f_verbose)
-                    printf("%s: Updated\n", d_name);
+                if (acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4) < 0) {
+		    perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
+                } else {
+		    if (f_verbose) {
+			print_xfd2path(stdout, d_dir, d_name);
+			printf(": Updated\n");
+		    }
+		}
             } else {
-                if (f_verbose)
-                    printf("%s: (NOT) Updated\n", d_name);
+                if (f_verbose) {
+		    print_xfd2path(stdout, d_dir, d_name);
+		    printf(": (NOT) Updated\n");
+		}
             }
         }
     } else if (s_acl != NULL && d_acl == NULL) {
         /* Source have ACL, Dest not */
 
         if (f_update) {
-            if (acl_set_fd_np(d_fd, d_acl, ACL_TYPE_NFS4) < 0) {
-                fprintf(stderr, "%s: Error: %s: acl_set_fd_np: %s\n",
-                        argv0, d_name, strerror(errno));
-                exit(1);
-            }
-            if (f_verbose)
-                printf("%s: Created\n", d_name);
+            if (acl_set_fd_np(d_fd->fd, d_acl, ACL_TYPE_NFS4) < 0) {
+		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
+            } else {
+		if (f_verbose) {
+		    print_xfd2path(stdout, d_dir, d_name);
+		    printf(": Created\n");
+		}
+	    }
         } else {
-            if (f_verbose)
-                printf("%s: (NOT) Created\n", d_name);
+            if (f_verbose) {
+		print_xfd2path(stdout, d_dir, d_name);
+                printf(": (NOT) Created\n");
+	    }
         }
 
     } else if (s_acl == NULL && d_acl != NULL) {
@@ -348,16 +466,19 @@ copy_acl(int s_dirfd,
         t_acl = acl_strip_np(d_acl, 0);
 
         if (f_update) {
-            if (acl_set_fd_np(d_fd, t_acl, ACL_TYPE_NFS4) < 0) {
-                fprintf(stderr, "%s: Error: %s: acl_set_fd_np: %s\n",
-                        argv0, d_name, strerror(errno));
-                exit(1);
-            }
-            if (f_verbose)
-                printf("%s: Cleared\n", d_name);
+            if (acl_set_fd_np(d_fd->fd, t_acl, ACL_TYPE_NFS4) < 0) {
+		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
+            } else {
+		if (f_verbose) {
+		    print_xfd2path(stdout, d_dir, d_name);
+		    printf(": Cleared\n");
+		}
+	    }
         } else {
-            if (f_verbose)
-                printf("%s: (NOT) Cleared\n", d_name);
+            if (f_verbose) {
+		print_xfd2path(stdout, d_dir, d_name);
+		printf(": (NOT) Cleared\n");
+	    }
         }
 
         acl_free(t_acl);
@@ -370,8 +491,8 @@ copy_acl(int s_dirfd,
     if (d_acl)
         acl_free(d_acl);
 
-    close(d_fd);
-    close(s_fd);
+    xfd_close(d_fd);
+    xfd_close(s_fd);
 
     return 0;
 }
@@ -387,8 +508,6 @@ usage(FILE *fp) {
 int
 main(int argc,
      char *argv[]) {
-    DIR *src, *dst;
-    char *cp, *name;
     int i, j, rc;
 
     for (i = 1; i < argc && argv[i][0] == '-'; i++) {
@@ -400,8 +519,11 @@ main(int argc,
             case 'n':
                 f_update = 0;
                 break;
+            case 'd':
+                f_debug++;
+                break;
             case 'i':
-                f_update = 0;
+                f_ignore++;
                 break;
             case 'f':
                 f_force++;
@@ -426,6 +548,6 @@ main(int argc,
         exit(1);
     }
 
-    rc = copy_acl(AT_FDCWD, argv[i], AT_FDCWD, argv[i+1], 0);
+    rc = copy_acl(NULL, argv[i], NULL, argv[i+1], 0);
     return rc ? 1 : 0;
 }
