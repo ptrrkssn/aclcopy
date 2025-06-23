@@ -24,7 +24,8 @@ AC_TYPE_UINT32_T
 AC_FUNC_ERROR_AT_LINE
 
 AC_CHECK_FUNCS([strdup strerror])
+AC_SEARCH_LIBS([acl_get_fd], [acl], [], [])
 AC_CHECK_FUNCS([acl_get_fd_np acl_get_entry_type_np acl_get_flagset_np acl_get_perm_np])
-AC_SEARCH_LIBS([acl_get_fd acl_get_file acl_get_perm], [acl], [], [])
+AC_CHECK_FUNCS([acl_get_file acl_get_perm])
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT

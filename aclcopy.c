@@ -198,7 +198,7 @@ compare_acl(acl_t sa,
                 acl_free(vp);
             } else
 		d_gid = -1;
-	    
+
             d = s_gid-d_gid;
             if (d)
                 return d;
@@ -288,11 +288,11 @@ strdupcat(const char *base,
     va_end(ap);
 
     va_start(ap, base);
-    
+
     rp = result = malloc(len+1);
     while (*base)
 	*rp++ = *base++;
-    
+
     while ((cp = va_arg(ap, char *)) != NULL) {
 	while (*cp)
 	    *rp++ = *cp++;
@@ -333,6 +333,8 @@ XFD *
 xfd_openat(XFD *dxp,
 	   const char *name) {
     XFD *xp;
+    int rc;
+
 
     xp = malloc(sizeof(*xp));
     if (!xp)
@@ -348,12 +350,17 @@ xfd_openat(XFD *dxp,
 	return NULL;
     }
 
-    if (fstatat(xp->fd, "", &xp->sb, AT_SYMLINK_NOFOLLOW|AT_EMPTY_PATH) < 0) {
+#ifdef AT_EMPTY_PATH
+    rc = fstatat(xp->fd, "", &xp->sb, AT_SYMLINK_NOFOLLOW|AT_EMPTY_PATH);
+#else
+    rc = fstatat(dxp ? dxp->fd : AT_FDCWD, name, &xp->sb, AT_SYMLINK_NOFOLLOW);
+#endif
+    if (rc < 0) {
 	close(xp->fd);
 	free(xp);
 	return NULL;
     }
-    
+
     if (name[0] == '/' || !dxp)
 	xp->path = strdupcat(name, NULL);
     else {
@@ -362,13 +369,13 @@ xfd_openat(XFD *dxp,
 	if (dxp)
 	    xp->path = strdupcat(dxp->path, "/", name, NULL);
     }
-    
+
     if (!xp->path) {
 	close(xp->fd);
 	free(xp);
 	return NULL;
     }
-    
+
     return xp;
 }
 
@@ -390,7 +397,7 @@ print_xfd2path(FILE *fp,
 
     while (path[0] == '.' && path[1] == '/')
 	path += 2;
-    
+
     if (dir)
 	return fprintf(fp, "%s/%s", dir->path, path);;
 
@@ -403,7 +410,7 @@ perror_xfd_exit(XFD *dir,
 		const char *path,
 		const char *msg) {
     n_errors++;
-    
+
     fprintf(stderr, "%s: Error: ", argv0);
     print_xfd2path(stderr, dir, path);
     fprintf(stderr, ": %s: %s",
@@ -416,6 +423,15 @@ perror_xfd_exit(XFD *dir,
 	exit(1);
 }
 
+#ifndef HAVE_ACL_STRIP_NP
+acl_t
+acl_strip_np(acl_t a,
+             int recalculate_mask) {
+    /* XXX: TODO */
+    return a;
+}
+#endif
+
 int
 copy_acl(XFD *s_dir,
 	 const char *s_name,
@@ -424,11 +440,10 @@ copy_acl(XFD *s_dir,
          int level) {
     acl_t s_acl, d_acl;
     XFD *s_fd, *d_fd;
-	
-
+    int rc;
 
     n_scanned++;
-    
+
     if (f_debug) {
 	fprintf(stderr, "%*s", level, "");
 	print_xfd2path(stderr, s_dir, s_name);
@@ -436,12 +451,12 @@ copy_acl(XFD *s_dir,
 	print_xfd2path(stderr, d_dir, d_name);
 	putc('\n', stderr);
     }
-    
+
     s_fd = xfd_openat(s_dir, s_name);
     if (!s_fd) {
 	if (errno == EMLINK)
 	    return 0;
-	
+
 	perror_xfd_exit(s_dir, s_name, "open");
 	return 0; /* Skip if source unreadable */
     }
@@ -458,8 +473,17 @@ copy_acl(XFD *s_dir,
 	print_xfd2path(stderr, s_dir, s_name);
 	fputs(" -> ", stderr);
 	print_xfd2path(stderr, d_dir, d_name);
-	fprintf(stderr, ": Different object types\n");
-        exit(1);
+	fprintf(stderr, ": Different object types");
+        if (f_ignore)
+            fputs(" [ignored]", stderr);
+        putc('\n', stderr);
+        if (f_ignore) {
+            xfd_close(d_fd);
+            xfd_close(s_fd);
+            return 0;
+        }
+        else
+            exit(1);
     }
 
     if (S_ISDIR(s_fd->sb.st_mode) && f_recurse) {
@@ -473,7 +497,7 @@ copy_acl(XFD *s_dir,
 	    perror_xfd_exit(d_dir, d_name, "Reopening as Directory");
 	    exit(1);
 	}
-	
+
         while ((nr = getdirentries(s_fd->fd, buf, sizeof(buf), &basep)) > 0) {
             char *ptr = buf;
 
@@ -489,9 +513,14 @@ copy_acl(XFD *s_dir,
 
 
     /* Update the ACL */
-
+#ifdef HAVE_ACL_GET_FD_NP
     s_acl = acl_get_fd_np(s_fd->fd, ACL_TYPE_NFS4);
     d_acl = acl_get_fd_np(d_fd->fd, ACL_TYPE_NFS4);
+#else
+    /* XXX: Handle POSIX.1e default ACL */
+    s_acl = acl_get_fd(s_fd->fd);
+    d_acl = acl_get_fd(d_fd->fd);
+#endif
 
     if (s_acl != NULL && d_acl != NULL) {
         /* Both have ACLs */
@@ -501,8 +530,13 @@ copy_acl(XFD *s_dir,
 		    perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
 		    exit(1);
 		}
-		
-                if (acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4) < 0) {
+
+#ifdef HAVE_ACL_SET_FD_NP
+                rc = acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4);
+#else
+                rc = acl_set_fd(d_fd->fd, s_acl);
+#endif
+                if (rc < 0) {
 		    perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
                 } else {
 		    n_updated++;
@@ -527,8 +561,13 @@ copy_acl(XFD *s_dir,
 		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
 		exit(1);
 	    }
-	    
-            if (acl_set_fd_np(d_fd->fd, d_acl, ACL_TYPE_NFS4) < 0) {
+
+#ifdef HAVE_ACL_SET_FD_NP
+            rc = acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4);
+#else
+            rc = acl_set_fd(d_fd->fd, s_acl);
+#endif
+            if (rc < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
 		n_updated++;
@@ -556,8 +595,13 @@ copy_acl(XFD *s_dir,
 		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
 		exit(1);
 	    }
-	    
-            if (acl_set_fd_np(d_fd->fd, t_acl, ACL_TYPE_NFS4) < 0) {
+
+#ifdef HAVE_ACL_SET_FD_NP
+            rc = acl_set_fd_np(d_fd->fd, t_acl, ACL_TYPE_NFS4);
+#else
+            rc = acl_set_fd(d_fd->fd, t_acl);
+#endif
+            if (rc < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
 		n_updated++;
@@ -600,7 +644,7 @@ copy_acl(XFD *s_dir,
 	} else
 	    spin();
     }
-    
+
     return 0;
 }
 
@@ -626,8 +670,8 @@ main(int argc,
     int i, j;
     time_t t0, t1;
     uint64_t dt;
-    
-    
+
+
     for (i = 1; i < argc && argv[i][0] == '-'; i++) {
         for (j = 1; argv[i][j]; j++) {
             switch (argv[i][j]) {
@@ -671,7 +715,7 @@ main(int argc,
     time(&t1);
 
     dt = t1-t0;
-    
+
     printf("[%lu scanned, %lu updated & %lu errors in %lu s]\n", n_scanned, n_updated, n_errors, dt);
 
     return n_errors > 0 ? 1 : 0;

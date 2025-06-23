@@ -1,15 +1,21 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
-/* Define to 1 if you have the 'acl_get_entry_type_np' function. */
+/* Define to 1 if you have the `acl_get_entry_type_np' function. */
 #undef HAVE_ACL_GET_ENTRY_TYPE_NP
 
-/* Define to 1 if you have the 'acl_get_fd_np' function. */
+/* Define to 1 if you have the `acl_get_fd_np' function. */
 #undef HAVE_ACL_GET_FD_NP
 
-/* Define to 1 if you have the 'acl_get_flagset_np' function. */
+/* Define to 1 if you have the `acl_get_file' function. */
+#undef HAVE_ACL_GET_FILE
+
+/* Define to 1 if you have the `acl_get_flagset_np' function. */
 #undef HAVE_ACL_GET_FLAGSET_NP
 
-/* Define to 1 if you have the 'acl_get_perm_np' function. */
+/* Define to 1 if you have the `acl_get_perm' function. */
+#undef HAVE_ACL_GET_PERM
+
+/* Define to 1 if you have the `acl_get_perm_np' function. */
 #undef HAVE_ACL_GET_PERM_NP
 
 /* Define to 1 if you have the <acl/libacl.h> header file. */
@@ -27,10 +33,10 @@
 /* Define to 1 if you have the <stdlib.h> header file. */
 #undef HAVE_STDLIB_H
 
-/* Define to 1 if you have the 'strdup' function. */
+/* Define to 1 if you have the `strdup' function. */
 #undef HAVE_STRDUP
 
-/* Define to 1 if you have the 'strerror' function. */
+/* Define to 1 if you have the `strerror' function. */
 #undef HAVE_STRERROR
 
 /* Define to 1 if you have the <strings.h> header file. */
@@ -69,7 +75,7 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
-/* Define to 1 if all of the C89 standard headers exist (not just the ones
+/* Define to 1 if all of the C90 standard headers exist (not just the ones
    required in a freestanding environment). This macro is provided for
    backward compatibility; new code need not use it. */
 #undef STDC_HEADERS
@@ -84,10 +90,10 @@
    #define below would cause a syntax error. */
 #undef _UINT8_T
 
-/* Define as 'unsigned int' if <stddef.h> doesn't define. */
+/* Define to `unsigned int' if <sys/types.h> does not define. */
 #undef size_t
 
-/* Define as 'int' if <sys/types.h> doesn't define. */
+/* Define to `int' if <sys/types.h> does not define. */
 #undef ssize_t
 
 /* Define to the type of an unsigned integer type of width exactly 16 bits if
