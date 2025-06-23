@@ -58,6 +58,7 @@ char *argv0 = "aclcopy";
 int f_verbose = 0;
 int f_update = 1;
 int f_recurse = 0;
+int f_onefsys = 0;
 int f_force = 0;
 int f_ignore = 0;
 int f_debug = 0;
@@ -461,6 +462,12 @@ copy_acl(XFD *s_dir,
 	return 0; /* Skip if source unreadable */
     }
 
+    /* Stop at filesystem boundary */
+    if (f_onefsys && s_dir && (s_dir->sb.st_dev != s_fd->sb.st_dev)) {
+	xfd_close(s_fd);
+	return 0;
+    }
+    
     d_fd = xfd_openat(d_dir, d_name);
     if (!d_fd) {
 	perror_xfd_exit(d_dir, d_name, "open");
@@ -660,6 +667,7 @@ usage(FILE *fp) {
     fprintf(fp, "  -i          Ignore errors\n");
     fprintf(fp, "  -f          Force updates\n");
     fprintf(fp, "  -r          Recurse\n");
+    fprintf(fp, "  -x          Stay inside filesystem\n");
     fprintf(fp, "  -h          Display this info\n");
 }
 
@@ -693,6 +701,9 @@ main(int argc,
             case 'r':
                 f_recurse++;
                 break;
+	    case 'x':
+		f_onefsys++;
+		break;
             case 'h':
                 usage(stdout);
                 exit(0);

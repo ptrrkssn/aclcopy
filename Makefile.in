@@ -112,5 +112,11 @@ uninstall:
 		if test -f "$(DESTDIR)$(MAN1DIR)/$$F"; then rm "$(DESTDIR)$(MAN1DIR)/$$F"; fi; \
 	done
 
-check:	aclcopy
-	-rm -fr t && mkdir -p t/d1 t/d2 && touch t/d1/f1.txt t/d2/f1.txt && setfacl -x 1 t/d2/f1.txt
+check:
+	@rm -fr t && mkdir -p t/d1 t/d2 && touch t/d1/f1.txt t/d2/f1.txt && $(MAKE) -s check-`uname -s`
+
+check-FreeBSD:	aclcopy
+	setfacl -x 1 t/d2/f1.txt && ./aclcopy -rv t/d1 t/d2
+
+check-Linux:	aclcopy
+	setfacl -m u:nobody:x t/d2/f1.txt && ./aclcopy -rv t/d1 t/d2
