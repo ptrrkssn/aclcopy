@@ -120,3 +120,6 @@ check-FreeBSD:	aclcopy
 
 check-Linux:	aclcopy
 	setfacl -m u:nobody:x t/d2/f1.txt && ./aclcopy -rv t/d1 t/d2
+
+check-Darwin:	aclcopy
+	chmod +a "nobody allow read" t/d2/f1.txt && ./aclcopy -rv t/d1 t/d2

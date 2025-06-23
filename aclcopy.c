@@ -63,31 +63,72 @@ int f_force = 0;
 int f_ignore = 0;
 int f_debug = 0;
 
-uint64_t n_scanned = 0;
-uint64_t n_updated = 0;
-uint64_t n_errors = 0;
+unsigned long n_scanned = 0;
+unsigned long n_updated = 0;
+unsigned long n_errors = 0;
 
 
 acl_perm_t perms[] = {
+#if defined(ACL_WRITE) || defined(__DARWIN_ACL_WRITE)
     ACL_EXECUTE,
     ACL_WRITE,
     ACL_READ,
-#ifdef ACL_READ_DATA
+#endif
+#if defined(ACL_READ_DATA) || defined(__DARWIN_ACL_READ_DATA)
     ACL_READ_DATA,
     ACL_WRITE_DATA,
     ACL_APPEND_DATA,
+#if defined(ACL_READ_NAMED_ATTRS)
     ACL_READ_NAMED_ATTRS,
     ACL_WRITE_NAMED_ATTRS,
+#endif
+#if defined(__DARWIN_ACL_READ_EXTATTRIBUTES)
+    ACL_READ_EXTATTRIBUTES,
+    ACL_WRITE_EXTATTRIBUTES,
+#endif
     ACL_DELETE_CHILD,
     ACL_READ_ATTRIBUTES,
     ACL_WRITE_ATTRIBUTES,
     ACL_DELETE,
+#if defined(ACL_READ_ACL)
     ACL_READ_ACL,
     ACL_WRITE_ACL,
+#endif
+#if defined(__DARWIN_ACL_READ_SECURITY)
+    ACL_READ_SECURITY,
+    ACL_WRITE_SECURITY,
+#endif
+#ifdef ACL_WRITE_OWNER
     ACL_WRITE_OWNER,
+#endif
+#ifdef __DARWIN_ACL_CHANGE_OWNER
+    ACL_CHANGE_OWNER,
+#endif    
     ACL_SYNCHRONIZE,
 #endif
 };
+
+
+acl_flag_t flags[] = {
+#if defined(ACL_ENTRY_FILE_INHERIT)
+    ACL_ENTRY_FILE_INHERIT,
+    ACL_ENTRY_DIRECTORY_INHERIT,
+    ACL_ENTRY_NO_PROPAGATE_INHERIT,
+    ACL_ENTRY_INHERIT_ONLY,
+    ACL_ENTRY_SUCCESSFUL_ACCESS,
+    ACL_ENTRY_FAILED_ACCESS,
+    ACL_ENTRY_INHERITED,
+#elif defined(__APPLE__)
+    ACL_FLAG_DEFER_INHERIT,
+    ACL_FLAG_NO_INHERIT,
+    ACL_ENTRY_INHERITED,
+    ACL_ENTRY_FILE_INHERIT,
+    ACL_ENTRY_DIRECTORY_INHERIT,
+    ACL_ENTRY_LIMIT_INHERIT,
+    ACL_ENTRY_ONLY_INHERIT,
+#endif
+};
+
 
 void
 spin(void) {
@@ -128,6 +169,23 @@ compare_permset(acl_permset_t a,
 }
 
 int
+compare_flagset(acl_flagset_t a,
+		acl_flagset_t b) {
+    int i;
+
+    for (i = 0; i < sizeof(flags)/sizeof(flags[0]); i++) {
+        int d, af, bf;
+	
+        af = acl_get_flag_np(a, flags[i]);
+        bf = acl_get_flag_np(b, flags[i]);
+	d = af-bf;
+	if (d)
+	    return d;
+    }
+    return 0;
+}
+
+int
 compare_acl(acl_t sa,
             acl_t da) {
 
@@ -135,15 +193,21 @@ compare_acl(acl_t sa,
 #if 1
     acl_entry_t s_e, d_e;
     int i;
+#if defined(ACL_USER) || defined(ACL_GROUP)
     void *vp;
+#endif
 
 
     i = 0;
     do {
         int s_rc, d_rc;
         acl_tag_t s_tt, d_tt;
+#ifdef ACL_USER
         uid_t s_uid, d_uid;
+#endif
+#ifdef ACL_GROUP
         gid_t s_gid, d_gid;
+#endif
         acl_permset_t s_ps, d_ps;
 #ifdef HAVE_ACL_GET_ENTRY_TYPE_NP
         acl_entry_type_t s_et, d_et;
@@ -168,6 +232,7 @@ compare_acl(acl_t sa,
             return d;
 
         switch (s_tt) {
+#ifdef ACL_USER
         case ACL_USER:
             vp = acl_get_qualifier(s_e);
 	    if (vp) {
@@ -185,6 +250,8 @@ compare_acl(acl_t sa,
             if (d)
                 return d;
             break;
+#endif
+#ifdef ACL_GROUP
         case ACL_GROUP:
             vp = acl_get_qualifier(s_e);
             if (vp) {
@@ -204,6 +271,13 @@ compare_acl(acl_t sa,
             if (d)
                 return d;
             break;
+#endif
+#ifdef __DARWIN_ACL_EXTENDED_ALLOW
+	case ACL_UNDEFINED_TAG:
+	case ACL_EXTENDED_ALLOW:
+	case ACL_EXTENDED_DENY:
+	    break;
+#endif
         }
 
         /* Allow vs Deny */
@@ -227,7 +301,7 @@ compare_acl(acl_t sa,
         s_rc = acl_get_flagset_np(s_e, &s_fs);
         d_rc = acl_get_flagset_np(d_e, &d_fs);
         /* XXX: Handle errors */
-        d = memcmp(s_fs, d_fs, sizeof(*s_fs));
+        d = compare_flagset(s_fs, d_fs);
         if (d)
             return d;
 #endif
@@ -329,6 +403,23 @@ xfd_reopen(XFD *xp,
     return dup2(fd, xp->fd);
 }
 
+DIR *
+xfd_opendir(XFD *xp) {
+    int fd;
+    
+    
+#ifdef O_EMPTY_PATH
+    fd = openat(xp->fd, "", O_EMPTY_PATH|O_RDONLY);
+#else
+    fd = openat(xp->fd, ".", O_RDONLY);
+#endif
+
+    if (fd < 0)
+	return NULL;
+    
+    return fdopendir(fd);
+}
+
 
 XFD *
 xfd_openat(XFD *dxp,
@@ -428,8 +519,12 @@ perror_xfd_exit(XFD *dir,
 acl_t
 acl_strip_np(acl_t a,
              int recalculate_mask) {
+#if defined(__APPLE__)
+    return acl_init(0);
+#else
     /* XXX: TODO */
-    return a;
+    return NULL
+#endif
 }
 #endif
 
@@ -495,34 +590,32 @@ copy_acl(XFD *s_dir,
 
     if (S_ISDIR(s_fd->sb.st_mode) && f_recurse) {
         struct dirent *dp;
-        char buf[8192];
-        ssize_t nr;
-        off_t basep = 0;
+	DIR *dirp;
 
 
-	if (xfd_reopen(s_fd, O_RDONLY|O_DIRECTORY) < 0) {
-	    perror_xfd_exit(d_dir, d_name, "Reopening as Directory");
+	dirp = xfd_opendir(s_fd);
+	if (!dirp) {
+	    perror_xfd_exit(d_dir, d_name, "opendir");
 	    exit(1);
 	}
-
-        while ((nr = getdirentries(s_fd->fd, buf, sizeof(buf), &basep)) > 0) {
-            char *ptr = buf;
-
-            while (ptr < buf+nr) {
-                dp = (struct dirent *) ptr;
-                if (is_valid_name(dp->d_name)) {
-                    copy_acl(s_fd, dp->d_name, d_fd, dp->d_name, level+1);
-                }
-                ptr += dp->d_reclen;
-            }
-        }
+	while ((dp = readdir(dirp)) != NULL) {
+	    if (is_valid_name(dp->d_name)) {
+		copy_acl(s_fd, dp->d_name, d_fd, dp->d_name, level+1);
+	    }
+	}
+	closedir(dirp);
     }
 
 
     /* Update the ACL */
 #ifdef HAVE_ACL_GET_FD_NP
+#ifdef ACL_TYPE_NFS4
     s_acl = acl_get_fd_np(s_fd->fd, ACL_TYPE_NFS4);
     d_acl = acl_get_fd_np(d_fd->fd, ACL_TYPE_NFS4);
+#else
+    s_acl = acl_get_fd_np(s_fd->fd, ACL_TYPE_EXTENDED);
+    d_acl = acl_get_fd_np(d_fd->fd, ACL_TYPE_EXTENDED);
+#endif
 #else
     /* XXX: Handle POSIX.1e default ACL */
     s_acl = acl_get_fd(s_fd->fd);
@@ -625,7 +718,8 @@ copy_acl(XFD *s_dir,
 	    }
         }
 
-        acl_free(t_acl);
+	if (t_acl)
+	    acl_free(t_acl);
     } else {
         /* Neither have ACLs */
     }
@@ -677,7 +771,7 @@ main(int argc,
      char *argv[]) {
     int i, j;
     time_t t0, t1;
-    uint64_t dt;
+    unsigned long dt;
 
 
     for (i = 1; i < argc && argv[i][0] == '-'; i++) {
