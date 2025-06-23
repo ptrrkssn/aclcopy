@@ -311,8 +311,15 @@ xfd_reopen(XFD *xp,
 
     if (xp->flags == flags)
 	return 0;
-    
+
+#ifdef O_EMPTY_PATH
     fd = openat(xp->fd, "", O_EMPTY_PATH|flags);
+#else
+    if (S_ISDIR(xp->sb.st_mode))
+	fd = openat(xp->fd, ".", flags);
+    else
+	fd = open(xp->path, flags);
+#endif
 
     if (fd < 0)
 	return -1;
@@ -331,7 +338,7 @@ xfd_openat(XFD *dxp,
     if (!xp)
 	return NULL;
 
-#ifdef O_PATH
+#if defined(O_PATH) && defined(O_EMPTY_PATH)
     xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_PATH);
 #else
     xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_RDONLY|O_NOFOLLOW|O_NONBLOCK);
