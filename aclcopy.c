@@ -42,6 +42,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #ifdef HAVE_SYS_ACL_H
@@ -60,6 +61,10 @@ int f_recurse = 0;
 int f_force = 0;
 int f_ignore = 0;
 int f_debug = 0;
+
+uint64_t n_scanned = 0;
+uint64_t n_updated = 0;
+uint64_t n_errors = 0;
 
 
 acl_perm_t perms[] = {
@@ -82,6 +87,21 @@ acl_perm_t perms[] = {
     ACL_SYNCHRONIZE,
 #endif
 };
+
+void
+spin(void) {
+    static time_t last;
+    time_t now;
+    char dials[] = "|/-\\";
+    static int p = 0;
+
+    time(&now);
+    if (now != last) {
+	fputc(dials[p++%4], stderr);
+	fputc('\b', stderr);
+	last = now;
+    }
+}
 
 int
 compare_permset(acl_permset_t a,
@@ -283,13 +303,13 @@ xfd_openat(XFD *dxp,
     if (!xp)
 	return NULL;
     
-    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, O_RDONLY);
+    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, O_RDONLY|O_NOFOLLOW|O_NONBLOCK);
     if (xp->fd < 0) {
 	free(xp);
 	return NULL;
     }
 
-    if (fstat(xp->fd, &xp->sb) < 0) {
+    if (fstatat(xp->fd, "", &xp->sb, AT_SYMLINK_NOFOLLOW|AT_EMPTY_PATH) < 0) {
 	close(xp->fd);
 	free(xp);
 	return NULL;
@@ -343,11 +363,17 @@ void
 perror_xfd_exit(XFD *dir,
 		const char *path,
 		const char *msg) {
+    n_errors++;
+    
     fprintf(stderr, "%s: Error: ", argv0);
     print_xfd2path(stderr, dir, path);
-    fprintf(stderr, "%s: %s\n",
+    fprintf(stderr, ": %s: %s",
 	    msg, strerror(errno));
     if (f_ignore)
+	fputs(" [ignored]", stderr);
+    putc('\n', stderr);
+
+    if (!f_ignore)
 	exit(1);
 }
 
@@ -362,6 +388,8 @@ copy_acl(XFD *s_dir,
 	
 
 
+    n_scanned++;
+    
     if (f_debug) {
 	fprintf(stderr, "%*s", level, "");
 	print_xfd2path(stderr, s_dir, s_name);
@@ -372,18 +400,18 @@ copy_acl(XFD *s_dir,
     
     s_fd = xfd_openat(s_dir, s_name);
     if (!s_fd) {
-        fprintf(stderr, "%s: Error: ", argv0);
-	print_xfd2path(stderr, s_dir, s_name);
-	fprintf(stderr, ": open: %s\n", strerror(errno));
-        exit(1);
+	if (errno == EMLINK)
+	    return 0;
+	
+	perror_xfd_exit(s_dir, s_name, "open");
+	return 0; /* Skip if source unreadable */
     }
 
     d_fd = xfd_openat(d_dir, d_name);
     if (!d_fd) {
-        fprintf(stderr, "%s: Error: ", argv0);
-	print_xfd2path(stderr, d_dir, d_name);
-	fprintf(stderr, ": open: %s\n", strerror(errno));
-        exit(1);
+	perror_xfd_exit(d_dir, d_name, "open");
+	xfd_close(s_fd);
+	return 0; /* Skip if target not exist */
     }
 
     if ((s_fd->sb.st_mode & S_IFMT) != (d_fd->sb.st_mode & S_IFMT)) {
@@ -428,12 +456,14 @@ copy_acl(XFD *s_dir,
                 if (acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4) < 0) {
 		    perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
                 } else {
+		    n_updated++;
 		    if (f_verbose) {
 			print_xfd2path(stdout, d_dir, d_name);
 			printf(": Updated\n");
 		    }
 		}
             } else {
+		n_updated++;
                 if (f_verbose) {
 		    print_xfd2path(stdout, d_dir, d_name);
 		    printf(": (NOT) Updated\n");
@@ -447,12 +477,14 @@ copy_acl(XFD *s_dir,
             if (acl_set_fd_np(d_fd->fd, d_acl, ACL_TYPE_NFS4) < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
+		n_updated++;
 		if (f_verbose) {
 		    print_xfd2path(stdout, d_dir, d_name);
 		    printf(": Created\n");
 		}
 	    }
         } else {
+	    n_updated++;
             if (f_verbose) {
 		print_xfd2path(stdout, d_dir, d_name);
                 printf(": (NOT) Created\n");
@@ -469,12 +501,14 @@ copy_acl(XFD *s_dir,
             if (acl_set_fd_np(d_fd->fd, t_acl, ACL_TYPE_NFS4) < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
+		n_updated++;
 		if (f_verbose) {
 		    print_xfd2path(stdout, d_dir, d_name);
 		    printf(": Cleared\n");
 		}
 	    }
         } else {
+	    n_updated++;
             if (f_verbose) {
 		print_xfd2path(stdout, d_dir, d_name);
 		printf(": (NOT) Cleared\n");
@@ -494,6 +528,20 @@ copy_acl(XFD *s_dir,
     xfd_close(d_fd);
     xfd_close(s_fd);
 
+    if (isatty(2)) {
+	if (f_verbose) {
+	    static time_t ts;
+	    time_t tn;
+
+	    time(&tn);
+	    if (tn != ts) {
+		fprintf(stderr, "[%lu]\r", n_scanned);
+		ts = tn;
+	    }
+	} else
+	    spin();
+    }
+    
     return 0;
 }
 
@@ -502,14 +550,25 @@ void
 usage(FILE *fp) {
     fprintf(fp, "Usage:\n  %s [<options>] <src> <dst>\n",
             argv0);
+    fprintf(fp, "Options\n");
+    fprintf(fp, "  -v          Increase verbosity\n");
+    fprintf(fp, "  -n          No update mode (dryrun)\n");
+    fprintf(fp, "  -d          Enable debugging output\n");
+    fprintf(fp, "  -i          Ignore errors\n");
+    fprintf(fp, "  -f          Force updates\n");
+    fprintf(fp, "  -r          Recurse\n");
+    fprintf(fp, "  -h          Display this info\n");
 }
 
 
 int
 main(int argc,
      char *argv[]) {
-    int i, j, rc;
-
+    int i, j;
+    time_t t0, t1;
+    uint64_t dt;
+    
+    
     for (i = 1; i < argc && argv[i][0] == '-'; i++) {
         for (j = 1; argv[i][j]; j++) {
             switch (argv[i][j]) {
@@ -548,6 +607,13 @@ main(int argc,
         exit(1);
     }
 
-    rc = copy_acl(NULL, argv[i], NULL, argv[i+1], 0);
-    return rc ? 1 : 0;
+    time(&t0);
+    copy_acl(NULL, argv[i], NULL, argv[i+1], 0);
+    time(&t1);
+
+    dt = t1-t0;
+    
+    printf("[%lu scanned, %lu updated & %lu errors in %lu s]\n", n_scanned, n_updated, n_errors, dt);
+
+    return n_errors > 0 ? 1 : 0;
 }

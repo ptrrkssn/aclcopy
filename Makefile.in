@@ -111,3 +111,6 @@ uninstall:
 	for F in aclcopy.1 aclcopy.1.gz; do \
 		if test -f "$(DESTDIR)$(MAN1DIR)/$$F"; then rm "$(DESTDIR)$(MAN1DIR)/$$F"; fi; \
 	done
+
+check:	aclcopy
+	-rm -fr t && mkdir -p t/d1 t/d2 && touch t/d1/f1.txt t/d2/f1.txt && setfacl -x 1 t/d2/f1.txt
