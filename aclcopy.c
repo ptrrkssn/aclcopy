@@ -103,12 +103,12 @@ acl_perm_t perms[] = {
 #endif
 #ifdef __DARWIN_ACL_CHANGE_OWNER
     ACL_CHANGE_OWNER,
-#endif    
+#endif
     ACL_SYNCHRONIZE,
 #endif
 };
 
-
+#ifdef HAVE_ACL_GET_FLAGSET_NP
 acl_flag_t flags[] = {
 #if defined(ACL_ENTRY_FILE_INHERIT)
     ACL_ENTRY_FILE_INHERIT,
@@ -128,7 +128,7 @@ acl_flag_t flags[] = {
     ACL_ENTRY_ONLY_INHERIT,
 #endif
 };
-
+#endif
 
 void
 spin(void) {
@@ -168,6 +168,7 @@ compare_permset(acl_permset_t a,
     return 0;
 }
 
+#ifdef HAVE_ACL_GET_FLAGSET_NP
 int
 compare_flagset(acl_flagset_t a,
 		acl_flagset_t b) {
@@ -175,7 +176,7 @@ compare_flagset(acl_flagset_t a,
 
     for (i = 0; i < sizeof(flags)/sizeof(flags[0]); i++) {
         int d, af, bf;
-	
+
         af = acl_get_flag_np(a, flags[i]);
         bf = acl_get_flag_np(b, flags[i]);
 	d = af-bf;
@@ -184,6 +185,7 @@ compare_flagset(acl_flagset_t a,
     }
     return 0;
 }
+#endif
 
 int
 compare_acl(acl_t sa,
@@ -406,8 +408,8 @@ xfd_reopen(XFD *xp,
 DIR *
 xfd_opendir(XFD *xp) {
     int fd;
-    
-    
+
+
 #ifdef O_EMPTY_PATH
     fd = openat(xp->fd, "", O_EMPTY_PATH|O_RDONLY);
 #else
@@ -416,7 +418,7 @@ xfd_opendir(XFD *xp) {
 
     if (fd < 0)
 	return NULL;
-    
+
     return fdopendir(fd);
 }
 
@@ -519,12 +521,7 @@ perror_xfd_exit(XFD *dir,
 acl_t
 acl_strip_np(acl_t a,
              int recalculate_mask) {
-#if defined(__APPLE__)
     return acl_init(0);
-#else
-    /* XXX: TODO */
-    return NULL
-#endif
 }
 #endif
 
@@ -562,7 +559,7 @@ copy_acl(XFD *s_dir,
 	xfd_close(s_fd);
 	return 0;
     }
-    
+
     d_fd = xfd_openat(d_dir, d_name);
     if (!d_fd) {
 	perror_xfd_exit(d_dir, d_name, "open");
