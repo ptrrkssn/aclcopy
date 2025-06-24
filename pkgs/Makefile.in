@@ -21,7 +21,7 @@ TMPDESTDIR =	$(TMPINSTDIR)/root
 TMPPKGDIR =	$(TMPINSTDIR)/pkg
 
 # DEB
-DEBTMPDIR =     /var/tmp/deb-tmp/aclcopy
+DEBTMPDIR =     /var/tmp/deb-build/aclcopy
 
 # RPM
 RPMBUILDDIR =	/root/rpmbuild
@@ -116,8 +116,8 @@ svr-install: svr
 deb debian ubuntu: deb-build
 
 deb-build: control
-	rm -fr "$(DEBTMPDIR)" ; mkdir -p "$(DEBTMPDIR)"
-	cp -r deb/* "$(DEBTMPDIR)"
+	rm -fr "$(DEBTMPDIR)" ; mkdir -p "$(DEBTMPDIR)/DEBIAN" "$(DEBTMPDIR)/usr/bin" "$(DEBTMPDIR)/usr/share/man/man1"
+	cp control "$(DEBTMPDIR)/DEBIAN"
 	cp ../aclcopy "$(DEBTMPDIR)/usr/bin"
 	cp ../aclcopy.man "$(DEBTMPDIR)/usr/share/man/man1/aclcopy.1" && gzip "$(DEBTMPDIR)/usr/share/man/man1/aclcopy.1"
 	chown -R root:root "$(DEBTMPDIR)" && dpkg -b "$(DEBTMPDIR)"
