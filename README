@@ -1,1 +1,9 @@
 aclcopy is a small tool that can be used to clone ACLs between directory trees.
+
+Works on:
+  FreeBSD (NFSv4/ZFS ACLs)
+  Linux (POSIX ACLs)
+  MacOS (Extended ACLs).
+
+Author:
+  Peter Eriksson <pen@lysator.liu.se>
