@@ -9,9 +9,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: install dependencies
       run: test "`uname -s`" = "Linux" -a -f /usr/bin/apt && sudo apt install libacl1-dev || true
+    - name: Test in FreeBSD
+      id: test
+      uses: vmactions/freebsd-vm@
+      with:
+        usesh: true
+        run: |
+          freebsd-version
     - name: configure
       run: ./configure
     - name: make
