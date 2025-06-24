@@ -38,6 +38,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #ifdef HAVE_SYS_ACL_H
 #  include <sys/acl.h>
@@ -203,7 +204,8 @@ _compare_acl(acl_t sa,
 
         s_rc = acl_get_entry(sa, (i ? ACL_NEXT_ENTRY : ACL_FIRST_ENTRY), &s_e);
         d_rc = acl_get_entry(da, (i ? ACL_NEXT_ENTRY : ACL_FIRST_ENTRY), &d_e);
-        if (!s_rc && !d_rc)
+
+        if (s_rc < 0 && d_rc < 0)
             return 0;
 
         d = s_rc - d_rc;
@@ -350,6 +352,9 @@ gacl_get(int fd,
     }
 #elif defined(__APPLE__)
     ap->impl.nfs4 = acl_get_fd_np(fd, ACL_TYPE_EXTENDED);
+    if (!ap->impl.nfs4)
+	ap->impl.nfs4 = acl_init(0);
+    
     if (ap->impl.nfs4) {
 	ap->type = GACL_TYPE_NFS4;
 	if (f_debug) {
@@ -478,10 +483,25 @@ gacl_cmp(GACL *a,
 	 GACL *b) {
     int d;
 
-    d = a->type - b->type;
-    if (d)
-	return d;
 
+    if (f_debug)
+	fprintf(stderr, "** gacl_cmp(%p, %p)\n", a, b);
+    
+    if (a && !b)
+	return 1;
+    else if (!a && b)
+	return -1;
+    else if (!a && !b)
+	return 0;
+    
+    if (f_debug)
+	fprintf(stderr, "** gacl_cmp(%p, %p): a->type=%d, b->type=%d\n",
+		a, b, a->type, b->type);
+    
+    d = a->type - b->type;
+    if (d) 
+	return d;
+    
     switch (a->type) {
     case GACL_TYPE_NFS4:
 #if defined(__FreeBSD__) || defined(__APPLE__)

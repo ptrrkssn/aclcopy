@@ -55,6 +55,7 @@ typedef struct {
     int flags;
     struct stat sb;
     char *path;
+    GACL *acl;
 } XFD;
 
 
@@ -229,14 +230,25 @@ xfd_openat(XFD *dxp,
 	return NULL;
     }
 
+    xp->acl = gacl_get(xp->fd, xp->path);
     return xp;
 }
 
 
 void
 xfd_close(XFD *xp) {
-    free(xp->path);
-    close(xp->fd);
+    if (xp->path) {
+	free(xp->path);
+	xp->path = NULL;
+    }
+    if (xp->acl) {
+	gacl_free(xp->acl);
+	xp->acl = NULL;
+    }
+    if (xp->fd >= 0) {
+	close(xp->fd);
+	xp->fd = -1;
+    }
     free(xp);
 }
 
@@ -286,30 +298,17 @@ acl_strip_np(acl_t a,
 
 
 
-GACL *
-get_acl(XFD *xp) {
-    return gacl_get(xp->fd, xp->path);
-}
-
-
-int
-set_acl(XFD *xp,
-	GACL *ap) {
-    return gacl_set(xp->fd, xp->path, ap);
-}
-
-
 int
 copy_acl(XFD *s_dir,
 	 const char *s_name,
          XFD *d_dir,
          const char *d_name,
          int level) {
-    GACL *s_acl, *d_acl;
     XFD *s_fd, *d_fd;
     int rc;
 
     n_scanned++;
+
 
     if (f_debug) {
 	fprintf(stderr, "%*s", level, "");
@@ -380,97 +379,31 @@ copy_acl(XFD *s_dir,
     }
 
 
-    /* Update the ACL */
-    s_acl = get_acl(s_fd);
-    d_acl = get_acl(d_fd);
-
-    if (s_acl != NULL && d_acl != NULL) {
-        /* Both have ACLs */
-        if (f_force || gacl_cmp(s_acl, d_acl) != 0) {
-            if (f_update) {
-		if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
-		    perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
-		    exit(1);
-		}
-
-                rc = set_acl(d_fd, s_acl);
-
-                if (rc < 0) {
-		    perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
-                } else {
-		    n_updated++;
-		    if (f_verbose) {
-			print_xfd2path(stdout, d_dir, d_name);
-			printf(": Updated\n");
-		    }
-		}
-            } else {
-		n_updated++;
-                if (f_verbose) {
-		    print_xfd2path(stdout, d_dir, d_name);
-		    printf(": (NOT) Updated\n");
-		}
-            }
-        }
-    } else if (s_acl != NULL && d_acl == NULL) {
-        /* Source have ACL, Dest not */
-
-        if (f_update) {
+    if (f_force || gacl_cmp(s_fd->acl, d_fd->acl) != 0) {
+	if (f_update) {
 	    if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
 		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
 		exit(1);
 	    }
-
-            rc = set_acl(d_fd, s_acl);
-            if (rc < 0) {
-		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
-            } else {
+	    
+	    rc = gacl_set(d_fd->fd, d_fd->path, s_fd->acl);
+	    if (rc < 0) {
+		perror_xfd_exit(d_dir, d_name, "Updating ACL");
+	    } else {
 		n_updated++;
 		if (f_verbose) {
 		    print_xfd2path(stdout, d_dir, d_name);
-		    printf(": Created\n");
+		    printf(": Updated\n");
 		}
 	    }
-        } else {
+	} else {
 	    n_updated++;
-            if (f_verbose) {
+	    if (f_verbose) {
 		print_xfd2path(stdout, d_dir, d_name);
-                printf(": (NOT) Created\n");
+		printf(": (NOT) Updated\n");
 	    }
-        }
-
-    } else if (s_acl == NULL && d_acl != NULL) {
-        if (f_update) {
-	    if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
-		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
-		exit(1);
-	    }
-
-            rc = set_acl(d_fd, NULL);
-            if (rc < 0) {
-		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
-            } else {
-		n_updated++;
-		if (f_verbose) {
-		    print_xfd2path(stdout, d_dir, d_name);
-		    printf(": Cleared\n");
-		}
-	    }
-        } else {
-	    n_updated++;
-            if (f_verbose) {
-		print_xfd2path(stdout, d_dir, d_name);
-		printf(": (NOT) Cleared\n");
-	    }
-        }
-    } else {
-        /* Neither have ACLs */
+	}
     }
-
-    if (s_acl)
-        acl_free(s_acl);
-    if (d_acl)
-        acl_free(d_acl);
 
     xfd_close(d_fd);
     xfd_close(s_fd);
