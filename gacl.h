@@ -52,24 +52,26 @@
 
 
 typedef struct {
-#if defined(__FreeBSD__)
-    acl_t nfs4;
-#endif
-#if defined(__APPLE__)
-    acl_t ext;
-#endif
+    enum {
+	GACL_TYPE_POSIX,
+	GACL_TYPE_NFS4,
+    } type;
+    union {
 #if defined(__linux__) || defined(__FreeBSD__)
-    struct {
-	acl_t a;
-	acl_t d;
-    } posix;
+	struct {
+	    acl_t a;
+	    acl_t d;
+	} posix;
 #endif
-#if defined(__linux__)
-    struct {
-	unsigned char *b;
-	ssize_t s;
-    } nfs4;
+#if defined(__FreeBSD__) || defined(__APPLE__)
+	acl_t nfs4;
+#elif defined(__linux__)
+	struct {
+	    unsigned char *b;
+	    ssize_t s;
+	} nfs4;
 #endif
+    } impl;
 } GACL;
 
 extern void

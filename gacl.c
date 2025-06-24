@@ -303,30 +303,22 @@ _compare_acl(acl_t sa,
 
 void
 gacl_free(GACL *ap) {
-#if defined(__FreeBSD__)
-    if (ap->nfs4) {
-        acl_free(ap->nfs4);
-    }
-#endif
-
-#if defined(__APPLE__)
-    if (ap->ext) {
-        acl_free(ap->ext);
-    }
-#endif
-
 #if defined(__linux__) || defined(__FreeBSD__)
-    if (ap->posix.a) {
-        acl_free(ap->posix.a);
+    if (ap->impl.posix.a) {
+        acl_free(ap->impl.posix.a);
     }
-    if (ap->posix.d) {
-        acl_free(ap->posix.d);
+    if (ap->impl.posix.d) {
+        acl_free(ap->impl.posix.d);
     }
 #endif
 
-#if defined(__linux__)
-    if (ap->nfs4.b) {
-        free(ap->nfs4.b);
+#if defined(__FreeBSD__) || defined(__APPLE__)
+    if (ap->impl.nfs4) {
+        acl_free(ap->impl.nfs4);
+    }
+#elif defined(__linux__)
+    if (ap->impl.nfs4.b) {
+        free(ap->impl.nfs4.b);
     }
 #endif
 
@@ -337,7 +329,6 @@ gacl_free(GACL *ap) {
 GACL *
 gacl_get(int fd,
 	 const char *path) {
-    int rc = -1;
     GACL *ap = malloc(sizeof(*ap));
 
     
@@ -347,33 +338,33 @@ gacl_get(int fd,
     memset(ap, 0, sizeof(*ap));
     
 #if defined(__FreeBSD__)
-    ap->nfs4 = acl_get_fd_np(fd, ACL_TYPE_NFS4);
-    if (ap->nfs4) {
-        rc = 0;
+    ap->impl.nfs4 = acl_get_fd_np(fd, ACL_TYPE_NFS4);
+    if (ap->impl.nfs4) {
+	ap->type = GACL_TYPE_NFS4;
+	if (f_debug) {
+	    fprintf(stderr, "** gacl_get(%s): Got NFS4\n", path);
+	    if (f_debug > 1)
+		fprintf(stderr, "ACL:\n%s\n", acl_to_text(ap->impl.nfs4, NULL));
+	}
+	return ap;
     }
-#endif
-    
-#if defined(__APPLE__)
-    ap->ext = acl_get_fd_np(fd, ACL_TYPE_EXTENDED);
-    if (ap->ext) {
-        rc = 0;
+#elif defined(__APPLE__)
+    ap->impl.nfs4 = acl_get_fd_np(fd, ACL_TYPE_EXTENDED);
+    if (ap->impl.nfs4) {
+	ap->type = GACL_TYPE_NFS4;
+	if (f_debug) {
+	    fprintf(stderr, "** gacl_get(%s): Got NFS4(EXTENDED)\n", path);
+	    if (f_debug > 1)
+		fprintf(stderr, "ACL:\n%s\n", acl_to_text(ap->impl.nfs4, NULL));
+	}
+	return ap;
     }
-#endif
-
-#if defined(__linux__) || defined(__FreeBSD__)
-    ap->posix.a = acl_get_file(path, ACL_TYPE_ACCESS);
-    if (ap->posix.a) {
-        rc = 0;
-    }
-    ap->posix.d = acl_get_file(path, ACL_TYPE_DEFAULT);
-#endif
-
-#if defined(__linux__)
-    ap->nfs4.s = fgetxattr(fd, ACL_NFS4_XATTR, NULL, 0);
-    if (ap->nfs4.s >= 0) {
+#elif defined(__linux__)
+    ap->impl.nfs4.s = fgetxattr(fd, ACL_NFS4_XATTR, NULL, 0);
+    if (ap->impl.nfs4.s >= 0) {
         ssize_t len;
-
-        ap->nfs4.b = malloc(ap->nfs4.s+1);
+	
+        ap->impl.nfs4.b = malloc(ap->nfs4.s+1);
 	if (!ap->nfs4.b) {
 	    return NULL;
 	}
@@ -385,16 +376,34 @@ gacl_get(int fd,
 		return NULL;
 	    }
 	}
+	if (len > 0) {
+	    ap->type = GACL_TYPE_NFS4;
+	    if (f_debug)
+		fprintf(stderr, "** gacl_get(%s): Got NFS4(xattr)\n", path);
+	    return ap;
+	}
     }
-    if (len > 0) {
-	rc = 0;
-    }
-}
 #endif
 
-    if (rc == 0)
-        return ap;
-
+#if defined(__linux__) || defined(__FreeBSD__)
+    ap->impl.posix.a = acl_get_file(path, ACL_TYPE_ACCESS);
+    if (ap->impl.posix.a) {
+	ap->type = GACL_TYPE_POSIX;
+	ap->impl.posix.d = acl_get_file(path, ACL_TYPE_DEFAULT);
+	
+	if (f_debug) {
+	    fprintf(stderr, "** gacl_get(%s): Got POSIX\n", path);
+	    if (f_debug > 1) {
+		fprintf(stderr, "Access:\n%s\n", acl_to_text(ap->impl.posix.a, NULL));
+		if (ap->impl.posix.d) 
+		    fprintf(stderr, "Default:\n%s\n", acl_to_text(ap->impl.posix.d, NULL));
+	    }
+	}
+	
+	return ap;
+    }
+#endif
+    
     gacl_free(ap);
     return NULL;
 }
@@ -408,45 +417,55 @@ gacl_set(int fd,
 
     /* XXX: Handle ap == NULL */
 
+    switch (ap->type) {
+    case GACL_TYPE_POSIX:
 #if defined(__linux__) || defined(__FreeBSD__)
-    if (ap->posix.d) {
-        if (f_debug)
-	    fprintf(stderr, "** set_acl: Setting POSIX(default)\n");
-        if (acl_set_file(path, ACL_TYPE_DEFAULT, ap->posix.d) < 0)
-            rc = -1;
-    }
-    if (ap->posix.a) {
-        if (f_debug)
-	    fprintf(stderr, "** set_acl: Setting POSIX(access)\n");
-        if (acl_set_fd(fd, ap->posix.a) < 0)
-            rc = -1;
-    }
+	if (ap->impl.posix.d) {
+	    if (f_debug)
+		fprintf(stderr, "** set_acl: Setting POSIX(default)\n");
+	    if (acl_set_file(path, ACL_TYPE_DEFAULT, ap->impl.posix.d) < 0)
+		rc = -1;
+	}
+	if (ap->impl.posix.a) {
+	    if (f_debug)
+		fprintf(stderr, "** set_acl: Setting POSIX(access)\n");
+	    if (acl_set_fd(fd, ap->impl.posix.a) < 0)
+		rc = -1;
+	}
+#else
+	errno = ENOSYS;
+	rc = -1;
 #endif
+	break;
 
+    case GACL_TYPE_NFS4:
 #if defined(__FreeBSD__)
-    if (ap->nfs4) {
-        if (f_debug)
-	    fprintf(stderr, "** set_acl: Setting NFS4\n");
-        if (acl_set_fd_np(fd, ap->nfs4, ACL_TYPE_NFS4) < 0)
-            rc = -1;
-    }
+	if (ap->impl.nfs4) {
+	    if (f_debug)
+		fprintf(stderr, "** set_acl(%s): Setting NFS4\n", path);
+	    if (acl_set_fd_np(fd, ap->impl.nfs4, ACL_TYPE_NFS4) < 0)
+		rc = -1;
+	}
+#elif defined(__APPLE__)
+	if (ap->impl.nfs4) {
+	    if (f_debug)
+		fprintf(stderr, "** set_acl(%s): Setting EXTENDED\n", path);
+	    if (acl_set_fd(fd, ap->impl.nfs4) < 0)
+		rc = -1;
+	}
+#elif defined(__linux__)
+	if (ap->nfs4.b) {
+	    if (f_debug)
+		fprintf(stderr, "** set_acl(%s): Setting NFS4(xattr)\n", path);
+	    if (fsetxattr(fd, ACL_NFS4_XATTR, ap->impl.nfs4.b, ap->impl.nfs4.s, 0) < 0)
+		rc = -1;
+	}
+#else
+	errno = ENOSYS;
+	rc = -1;
 #endif
-
-#if defined(__APPLE__)
-    if (ap->ext) {
-        if (acl_set_fd(fd, ap->ext) < 0)
-            rc = -1;
+	break;
     }
-#endif
-
-#if defined(__linux__)
-    if (ap->nfs4.b) {
-        if (f_debug)
-	    fprintf(stderr, "** set_acl: Setting NFS4(xattr)\n");
-        if (fsetxattr(fd, ACL_NFS4_XATTR, ap->nfs4.b, ap->nfs4.s, 0) < 0)
-            rc = -1;
-    }
-#endif
 
     return rc;
 }
@@ -456,42 +475,38 @@ gacl_set(int fd,
 int
 gacl_cmp(GACL *a,
 	 GACL *b) {
-    int rc;
+    int d;
 
-#if defined(__FreeBSD__)
-    rc = _compare_acl(a->nfs4, b->nfs4);
-    if (rc)
-        return rc;
+    d = a->type - b->type;
+    if (d)
+	return d;
+
+    switch (a->type) {
+    case GACL_TYPE_NFS4:
+#if defined(__FreeBSD__) || defined(__APPLE__)
+	d = _compare_acl(a->impl.nfs4, b->impl.nfs4);
+#elif defined(__linux__)
+	/* Linux NFS4 ACLs via XATTR */
+	d = a->impl.nfs4.s - b->impl.nfs4.s;
+	if (d)
+	    return d;
+	if (a->impl.nfs4.s == 0)
+	    return 0;
+
+	d = memcmp(a->impl.nfs4.b, b->impl.nfs4.b, a->impl.nfs4.s);
 #endif
+	break;
 
-#if defined(__APPLE__)
-    rc = _compare_acl(a->ext, b->ext);
-    if (rc)
-        return rc;
-#endif
-
-#if defined(__linux__)
-    /* NFS4 ACLs */
-
-    rc = a->nfs4.s - b->nfs4.s;
-    if (rc)
-        return rc;
-    if (a->nfs4.s > 0) {
-        rc = memcmp(a->nfs4.b, b->nfs4.b, a->nfs4.s);
-        if (rc)
-            return rc;
-    }
-#endif
-
+    case GACL_TYPE_POSIX:
 #if defined(__linux__) || defined(__FreeBSD__)
-    rc = _compare_acl(a->posix.d, b->posix.d);
-    if (rc)
-        return rc;
-    rc = _compare_acl(a->posix.a, b->posix.a);
-    if (rc)
-        return rc;
+	d = _compare_acl(a->impl.posix.d, b->impl.posix.d);
+	if (d)
+	    return d;
+	d = _compare_acl(a->impl.posix.a, b->impl.posix.a);
 #endif
+	break;
+    }
 
-    return 0;
+    return d;
 }
 
