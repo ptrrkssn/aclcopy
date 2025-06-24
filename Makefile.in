@@ -64,9 +64,11 @@ aclcopy: $(ACLCOPY_OBJS)
 # Clean targets
 maintainer-clean:
 	$(MAKE) -f Makefile.dist distclean
+	(cd pkgs && $(MAKE) -f Makefile.dist maintainer-clean
 
 distclean:
 	$(MAKE) -f Makefile.dist distclean
+	(cd pkgs && $(MAKE) -f Makefile.dist distclean)
 
 clean mostlyclean:
 	$(MAKE) -f Makefile.dist clean
@@ -112,6 +114,17 @@ uninstall:
 		if test -f "$(DESTDIR)$(MAN1DIR)/$$F"; then rm "$(DESTDIR)$(MAN1DIR)/$$F"; fi; \
 	done
 
+dist:	$(PACKAGE)-$(VERSION).tar.gz
+
+$(PACKAGE)-$(VERSION).tar.gz: aclcopy
+	rm -fr "$(DISTDIR)" && mkdir -p "$(DISTDIR)/$(PACKAGE)-$(VERSION)" && \
+	  cp -r * "$(DISTDIR)/$(PACKAGE)-$(VERSION)" && \
+	  (cd "$(DISTDIR)/$(PACKAGE)-$(VERSION)" && $(MAKE) distclean)
+	(cd "$(DISTDIR)" && $(TAR) cvf - "$(PACKAGE)-$(VERSION)") | gzip >"$(PACKAGE)-$(VERSION)".tar.gz
+	echo rm -fr "$(DISTDIR)"
+	@echo ""
+	@echo "*** $(PACKAGE)-$(VERSION).tar.gz created"
+
 check:
 	@rm -fr t && mkdir -p t/d1 t/d2 && touch t/d1/f1.txt t/d2/f1.txt && ln -s none t/d1/link && ln -s none t/d2/link && mkfifo t/d1/fifo t/d2/fifo && $(MAKE) -s check-`uname -s`
 
@@ -124,3 +137,4 @@ check-Linux:	aclcopy
 
 check-Darwin:	aclcopy
 	chmod +a "nobody allow read" t/d2/f1.txt && ./aclcopy -rv t/d1 t/d2
+

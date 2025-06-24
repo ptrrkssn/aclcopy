@@ -27,5 +27,6 @@ AC_CHECK_FUNCS([strdup strerror])
 AC_SEARCH_LIBS([acl_get_fd], [acl], [], [])
 AC_CHECK_FUNCS([acl_get_fd_np acl_get_entry_type_np acl_get_flagset_np acl_get_perm_np acl_strip_np])
 AC_CHECK_FUNCS([acl_get_file acl_get_perm acl_get_flag_np])
-AC_CONFIG_FILES([Makefile])
+
+AC_CONFIG_FILES([Makefile pkgs/Makefile pkgs/Makefile.port pkgs/aclcopy.rb pkgs/pkginfo pkgs/aclcopy.spec pkgs/pkg-descr pkgs/build.sh pkgs/control])
 AC_OUTPUT

@@ -563,7 +563,9 @@ copy_acl(XFD *s_dir,
 
     d_fd = xfd_openat(d_dir, d_name);
     if (!d_fd) {
-	perror_xfd_exit(d_dir, d_name, "open(dst)");
+	if (f_verbose > 1 || !(errno == ENOENT && f_ignore)) {
+	    perror_xfd_exit(d_dir, d_name, "open(dst)");
+	}
 	xfd_close(s_fd);
 	return 0; /* Skip if target not exist */
     }
