@@ -97,7 +97,7 @@ install-bin-strip: $(PROGRAMS)
 install-aliases:
 	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
 
-install-man:  acltool.man
+install-man:  aclcopy.man
 	$(INSTALL) -d "$(DESTDIR)$(MAN1DIR)"
 	$(INSTALL) -m 644 aclcopy.man "$(DESTDIR)$(MAN1DIR)/aclcopy.1"
 	if test -f /usr/share/man/man1/cat.1.gz; then \

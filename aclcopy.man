@@ -1,0 +1,74 @@
+.\" Manual page for aclcopy
+.\" Contact pen@lysator.liu.se to correct errors or typos.
+.TH acltool 1 "24 June 2025" "1.0.0" "aclcopy man page"
+
+.SH NAME
+aclcopy \- Clone ACLs between files & directory trees
+
+.SH SYNOPSIS
+.B aclcopy
+.RI "[" "<option>*" "]"
+.RI "<src>" ""
+.RI "<dst>" ""
+
+.SH DESCRIPTION
+.B aclcopy
+is a tool to copy (clone) ACLs between files / directory trees.
+
+.SH OPTIONS
+.TP
+.B "-h"
+Display usage information.
+.TP
+.B "-v"
+Increase verbosity level
+.TP
+.B "-n"
+No-update mode.
+.TP
+.B "-r"
+Recurse thru directory tree.
+.TP
+.B "-d"
+Increase debugging level
+.TP
+.B "-f"
+Force updates of ACLs
+.TP
+.B "-i"
+Ignore non-fatal errors
+.TP
+.B "-x"
+Stay inside source filesystem
+.TP
+.B "-t"
+Test mode - exit status 1 if ACLs needs updating
+
+.SH SEE ALSO
+.TP
+.B BSD
+setfacl(1), getfacl(1), acl(3), acl(9)
+.TP
+.B SunOS
+acl(2), chmod(1), ls(1), acl(5)
+.TP
+.B Linux
+nfs4_getfacl(1), nfs4_setf acl(1), nfs4_acl(5), acl(5), setfacl(1), getfacl(1)
+.TP
+.B MacOS
+acl(3), ls(1), chmod(1)
+.TP
+.B RFC's
+RFC3530 (NFSv4.0)
+RFC5661 (NFSv4.1)
+RFC7862 (NFSv4.2)
+RFC8276 (File System Extended Attributes in NFSv4)
+
+.SH BUGS
+No known bugs
+
+.SH SOURCE
+https://github.com/ptrrkssn/aclcopy
+
+.SH AUTHOR
+Peter Eriksson <pen@lysator.liu.se>
