@@ -57,6 +57,7 @@ char *argv0 = "aclcopy";
 
 int f_verbose = 0;
 int f_update = 1;
+int f_test = 0;
 int f_recurse = 0;
 int f_onefsys = 0;
 int f_force = 0;
@@ -435,7 +436,7 @@ xfd_openat(XFD *dxp,
 	return NULL;
 
 #if defined(O_PATH) && defined(O_EMPTY_PATH)
-    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_PATH);
+    xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_PATH|O_NOFOLLOW);
 #else
     xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_RDONLY|O_NOFOLLOW|O_NONBLOCK);
 #endif
@@ -755,10 +756,11 @@ usage(FILE *fp) {
     fprintf(fp, "  -v          Increase verbosity\n");
     fprintf(fp, "  -n          No update mode (dryrun)\n");
     fprintf(fp, "  -d          Enable debugging output\n");
-    fprintf(fp, "  -i          Ignore errors\n");
-    fprintf(fp, "  -f          Force updates\n");
-    fprintf(fp, "  -r          Recurse\n");
+    fprintf(fp, "  -i          Ignore non-fatal errors\n");
+    fprintf(fp, "  -f          Force update of ACLs\n");
+    fprintf(fp, "  -r          Recurse into directories\n");
     fprintf(fp, "  -x          Stay inside filesystem\n");
+    fprintf(fp, "  -t          Test mode - exit status 1 if ACLs needs update\n");
     fprintf(fp, "  -h          Display this info\n");
 }
 
@@ -779,6 +781,9 @@ main(int argc,
                 break;
             case 'n':
                 f_update = 0;
+                break;
+            case 't':
+                f_test++;
                 break;
             case 'd':
                 f_debug++;
@@ -818,7 +823,8 @@ main(int argc,
 
     dt = t1-t0;
 
-    printf("[%lu scanned, %lu updated & %lu errors in %lu s]\n", n_scanned, n_updated, n_errors, dt);
+    if (f_verbose)
+	printf("[%lu scanned, %lu updated & %lu errors in %lu s]\n", n_scanned, n_updated, n_errors, dt);
 
-    return n_errors > 0 ? 1 : 0;
+    return f_test ? (n_updated > 0 ? 1 : 0) : (n_errors > 0 ? 1 : 0);
 }

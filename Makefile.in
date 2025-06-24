@@ -113,7 +113,8 @@ uninstall:
 	done
 
 check:
-	@rm -fr t && mkdir -p t/d1 t/d2 && touch t/d1/f1.txt t/d2/f1.txt && $(MAKE) -s check-`uname -s`
+	@rm -fr t && mkdir -p t/d1 t/d2 && touch t/d1/f1.txt t/d2/f1.txt && ln -s none t/d1/link && ln -s none t/d2/link && mkfifo t/d1/fifo t/d2/fifo && $(MAKE) -s check-`uname -s`
+
 
 check-FreeBSD:	aclcopy
 	setfacl -x 1 t/d2/f1.txt && ./aclcopy -rv t/d1 t/d2
