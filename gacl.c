@@ -205,6 +205,12 @@ _compare_acl(acl_t sa,
         s_rc = acl_get_entry(sa, (i ? ACL_NEXT_ENTRY : ACL_FIRST_ENTRY), &s_e);
         d_rc = acl_get_entry(da, (i ? ACL_NEXT_ENTRY : ACL_FIRST_ENTRY), &d_e);
 
+#if !defined(__APPLE__)
+	/* Apple returns 0 for "Got entry", FreeBSD uses 1 for "Got entry" */
+        if (!s_rc  && !d_rc)
+            return 0;
+#endif
+	
         if (s_rc < 0 && d_rc < 0)
             return 0;
 
