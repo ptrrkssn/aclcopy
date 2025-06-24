@@ -14,9 +14,12 @@ jobs:
       run: test "`uname -s`" = "Linux" -a -f /usr/bin/apt && sudo apt install libacl1-dev || true
     - name: Test in FreeBSD
       id: test
-      uses: vmactions/freebsd-vm@
+      uses: vmactions/freebsd-vm@v0
       with:
         usesh: true
+        sync: sshfs
+        prepare: |
+          pkg install -y curl
         run: |
           freebsd-version
     - name: configure
