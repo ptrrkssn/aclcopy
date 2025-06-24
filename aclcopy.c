@@ -68,6 +68,8 @@ int f_onefsys = 0;
 int f_force = 0;
 int f_ignore = 0;
 int f_debug = 0;
+int f_posix = 0;
+int f_extended = 0;
 
 unsigned long n_scanned = 0;
 unsigned long n_updated = 0;
@@ -535,6 +537,12 @@ main(int argc,
                 exit(0);
             case 'v':
                 f_verbose++;
+                break;
+            case 'p':
+                f_posix++;
+                break;
+            case 'e':
+                f_extended++;
                 break;
             case 'n':
                 f_update = 0;

@@ -331,12 +331,12 @@ gacl_get(int fd,
 	 const char *path) {
     GACL *ap = malloc(sizeof(*ap));
 
-    
+
     if (!ap)
         return NULL;
 
     memset(ap, 0, sizeof(*ap));
-    
+
 #if defined(__FreeBSD__)
     ap->impl.nfs4 = acl_get_fd_np(fd, ACL_TYPE_NFS4);
     if (ap->impl.nfs4) {
@@ -363,16 +363,17 @@ gacl_get(int fd,
     ap->impl.nfs4.s = fgetxattr(fd, ACL_NFS4_XATTR, NULL, 0);
     if (ap->impl.nfs4.s >= 0) {
         ssize_t len;
-	
-        ap->impl.nfs4.b = malloc(ap->nfs4.s+1);
-	if (!ap->nfs4.b) {
+
+        ap->impl.nfs4.b = malloc(ap->impl.nfs4.s+1);
+	if (!ap->impl.nfs4.b) {
 	    return NULL;
 	}
-	
-        while ((len = fgetxattr(xp->fd, ACL_NFS4_XATTR, ap->nfs4.b, ap->nfs4.s+1)) > 0 && len == ap->nfs4.s+1) {
-	    ap->nfs4.s += 1024;
-	    ap->nfs4.b = realloc(ap->nfs4.b, ap->nfs4.s+1);
-	    if (!ap->nfs4.b) {
+
+        while ((len = fgetxattr(fd, ACL_NFS4_XATTR, ap->impl.nfs4.b, ap->impl.nfs4.s+1)) > 0 && len == ap->impl.nfs4.s+1) {
+	    ap->impl.nfs4.s += 1024;
+	    ap->impl.nfs4.b = realloc(ap->impl.nfs4.b, ap->impl.nfs4.s+1);
+
+	    if (!ap->impl.nfs4.b) {
 		return NULL;
 	    }
 	}
@@ -390,20 +391,20 @@ gacl_get(int fd,
     if (ap->impl.posix.a) {
 	ap->type = GACL_TYPE_POSIX;
 	ap->impl.posix.d = acl_get_file(path, ACL_TYPE_DEFAULT);
-	
+
 	if (f_debug) {
 	    fprintf(stderr, "** gacl_get(%s): Got POSIX\n", path);
 	    if (f_debug > 1) {
 		fprintf(stderr, "Access:\n%s\n", acl_to_text(ap->impl.posix.a, NULL));
-		if (ap->impl.posix.d) 
+		if (ap->impl.posix.d)
 		    fprintf(stderr, "Default:\n%s\n", acl_to_text(ap->impl.posix.d, NULL));
 	    }
 	}
-	
+
 	return ap;
     }
 #endif
-    
+
     gacl_free(ap);
     return NULL;
 }
@@ -454,7 +455,7 @@ gacl_set(int fd,
 		rc = -1;
 	}
 #elif defined(__linux__)
-	if (ap->nfs4.b) {
+	if (ap->impl.nfs4.b) {
 	    if (f_debug)
 		fprintf(stderr, "** set_acl(%s): Setting NFS4(xattr)\n", path);
 	    if (fsetxattr(fd, ACL_NFS4_XATTR, ap->impl.nfs4.b, ap->impl.nfs4.s, 0) < 0)
@@ -509,4 +510,3 @@ gacl_cmp(GACL *a,
 
     return d;
 }
-
