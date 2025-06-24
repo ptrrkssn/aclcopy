@@ -210,7 +210,7 @@ _compare_acl(acl_t sa,
         if (!s_rc  && !d_rc)
             return 0;
 #endif
-	
+
         if (s_rc < 0 && d_rc < 0)
             return 0;
 
@@ -311,24 +311,37 @@ _compare_acl(acl_t sa,
 
 void
 gacl_free(GACL *ap) {
-#if defined(__linux__) || defined(__FreeBSD__)
-    if (ap->impl.posix.a) {
-        acl_free(ap->impl.posix.a);
-    }
-    if (ap->impl.posix.d) {
-        acl_free(ap->impl.posix.d);
-    }
-#endif
+    if (!ap)
+        return;
 
-#if defined(__FreeBSD__) || defined(__APPLE__)
-    if (ap->impl.nfs4) {
-        acl_free(ap->impl.nfs4);
-    }
-#elif defined(__linux__)
-    if (ap->impl.nfs4.b) {
-        free(ap->impl.nfs4.b);
-    }
+    switch (ap->type) {
+    case GACL_TYPE_POSIX:
+#if defined(__linux__) || defined(__FreeBSD__)
+        if (ap->impl.posix.a) {
+            acl_free(ap->impl.posix.a);
+            ap->impl.posix.a = NULL;
+        }
+        if (ap->impl.posix.d) {
+            acl_free(ap->impl.posix.d);
+            ap->impl.posix.d = NULL;
+        }
 #endif
+        break;
+
+    case GACL_TYPE_NFS4:
+#if defined(__FreeBSD__) || defined(__APPLE__)
+        if (ap->impl.nfs4) {
+            acl_free(ap->impl.nfs4);
+            ap->impl.nfs4 = NULL;
+        }
+#elif defined(__linux__)
+        if (ap->impl.nfs4.b) {
+            free(ap->impl.nfs4.b);
+            ap->impl.nfs4.b = NULL;
+        }
+#endif
+        break;
+    }
 
     memset(ap, 0, sizeof(*ap));
     free(ap);
@@ -360,7 +373,7 @@ gacl_get(int fd,
     ap->impl.nfs4 = acl_get_fd_np(fd, ACL_TYPE_EXTENDED);
     if (!ap->impl.nfs4)
 	ap->impl.nfs4 = acl_init(0);
-    
+
     if (ap->impl.nfs4) {
 	ap->type = GACL_TYPE_NFS4;
 	if (f_debug) {
@@ -492,22 +505,22 @@ gacl_cmp(GACL *a,
 
     if (f_debug)
 	fprintf(stderr, "** gacl_cmp(%p, %p)\n", a, b);
-    
+
     if (a && !b)
 	return 1;
     else if (!a && b)
 	return -1;
     else if (!a && !b)
 	return 0;
-    
+
     if (f_debug)
 	fprintf(stderr, "** gacl_cmp(%p, %p): a->type=%d, b->type=%d\n",
 		a, b, a->type, b->type);
-    
+
     d = a->type - b->type;
-    if (d) 
+    if (d)
 	return d;
-    
+
     switch (a->type) {
     case GACL_TYPE_NFS4:
 #if defined(__FreeBSD__) || defined(__APPLE__)
