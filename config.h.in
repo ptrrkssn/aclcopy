@@ -9,11 +9,11 @@
 /* Define to 1 if you have the `acl_get_file' function. */
 #undef HAVE_ACL_GET_FILE
 
-/* Define to 1 if you have the `acl_get_flag' function. */
-#undef HAVE_ACL_GET_FLAG
-
 /* Define to 1 if you have the `acl_get_flagset_np' function. */
 #undef HAVE_ACL_GET_FLAGSET_NP
+
+/* Define to 1 if you have the `acl_get_flag_np' function. */
+#undef HAVE_ACL_GET_FLAG_NP
 
 /* Define to 1 if you have the `acl_get_perm' function. */
 #undef HAVE_ACL_GET_PERM

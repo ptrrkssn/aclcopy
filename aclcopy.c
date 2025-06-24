@@ -548,10 +548,10 @@ copy_acl(XFD *s_dir,
 
     s_fd = xfd_openat(s_dir, s_name);
     if (!s_fd) {
-	if (errno == EMLINK)
+	if (errno == ELOOP || errno == EMLINK)
 	    return 0;
 
-	perror_xfd_exit(s_dir, s_name, "open");
+	perror_xfd_exit(s_dir, s_name, "open(src)");
 	return 0; /* Skip if source unreadable */
     }
 
@@ -563,7 +563,7 @@ copy_acl(XFD *s_dir,
 
     d_fd = xfd_openat(d_dir, d_name);
     if (!d_fd) {
-	perror_xfd_exit(d_dir, d_name, "open");
+	perror_xfd_exit(d_dir, d_name, "open(dst)");
 	xfd_close(s_fd);
 	return 0; /* Skip if target not exist */
     }
@@ -752,7 +752,8 @@ void
 usage(FILE *fp) {
     fprintf(fp, "Usage:\n  %s [<options>] <src> <dst>\n",
             argv0);
-    fprintf(fp, "Options\n");
+    fprintf(fp, "\nOptions\n");
+    fprintf(fp, "  -V          Display version and exit\n");
     fprintf(fp, "  -v          Increase verbosity\n");
     fprintf(fp, "  -n          No update mode (dryrun)\n");
     fprintf(fp, "  -d          Enable debugging output\n");
@@ -761,7 +762,17 @@ usage(FILE *fp) {
     fprintf(fp, "  -r          Recurse into directories\n");
     fprintf(fp, "  -x          Stay inside filesystem\n");
     fprintf(fp, "  -t          Test mode - exit status 1 if ACLs needs update\n");
-    fprintf(fp, "  -h          Display this info\n");
+    fprintf(fp, "  -h          Display this info and exit\n");
+    fprintf(fp, "\nVersion:\n  %s\n", PACKAGE_VERSION);
+    fprintf(fp, "\nWebsite:\n  %s\n", PACKAGE_URL);
+    fprintf(fp, "\nAuthor:\n  Peter Eriksson <%s>\n", PACKAGE_BUGREPORT);
+
+}
+
+void
+print_version(FILE *fp) {
+    fprintf(fp, "[aclcopy, version %s - Copyright (c) 2025 Peter Eriksson %s]\n",
+            PACKAGE_VERSION, PACKAGE_BUGREPORT);
 }
 
 
@@ -776,6 +787,9 @@ main(int argc,
     for (i = 1; i < argc && argv[i][0] == '-'; i++) {
         for (j = 1; argv[i][j]; j++) {
             switch (argv[i][j]) {
+            case 'V':
+                print_version(stdout);
+                exit(0);
             case 'v':
                 f_verbose++;
                 break;
@@ -816,6 +830,9 @@ main(int argc,
                 argv[0]);
         exit(1);
     }
+
+    if (f_verbose)
+        print_version(stdout);
 
     time(&t0);
     copy_acl(NULL, argv[i], NULL, argv[i+1], 0);

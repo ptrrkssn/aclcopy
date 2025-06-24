@@ -1,5 +1,5 @@
 AC_PREREQ([2.71])
-AC_INIT([aclcopy],[1.0],[pen@lysator.liu.se],[dosattrib],[https://github.com/ptrrkssn/aclcopy])
+AC_INIT([aclcopy],[1.0],[pen@lysator.liu.se],[aclcopy],[https://github.com/ptrrkssn/aclcopy])
 AC_CONFIG_AUX_DIR([build-aux])
 
 AC_CONFIG_SRCDIR([aclcopy.c])
