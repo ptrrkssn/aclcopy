@@ -12,6 +12,7 @@ AC_PROG_MAKE_SET
 
 # Checks for header files.
 AC_CHECK_HEADERS([sys/acl.h acl/libacl.h])
+AC_CHECK_HEADERS([sys/xattr.h sys/extattr.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_SIZE_T
@@ -23,7 +24,8 @@ AC_TYPE_UINT32_T
 # Checks for library functions.
 AC_FUNC_ERROR_AT_LINE
 
-AC_CHECK_FUNCS([strdup strerror])
+AC_CHECK_FUNCS([extattr_get_fd fgetxattr extattr_set_fd fsetxattr extattr_delete_fd fremovexattr attropen])
+
 AC_SEARCH_LIBS([acl_get_fd], [acl], [], [])
 AC_CHECK_FUNCS([acl_get_fd_np acl_get_entry_type_np acl_get_flagset_np acl_get_perm_np acl_strip_np])
 AC_CHECK_FUNCS([acl_get_file acl_get_perm acl_get_flag_np])

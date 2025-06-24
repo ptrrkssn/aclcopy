@@ -45,13 +45,50 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+
 #ifdef HAVE_SYS_ACL_H
 #  include <sys/acl.h>
 #endif
+
 #ifdef HAVE_ACL_LIBACL_H
 #  include <acl/libacl.h>
 #endif
 
+#ifdef HAVE_SYS_XATTR_H /* Linux */
+#  include <sys/xattr.h>
+#  define ACL_NFS4_XATTR "system.nfs4_acl"
+#endif
+
+
+
+typedef struct {
+    int fd;
+    int flags;
+    struct stat sb;
+    char *path;
+} XFD;
+
+
+typedef struct {
+#if defined(__FreeBSD__)
+  acl_t nfs4;
+#endif
+#if defined(__APPLE__)
+  acl_t ext;
+#endif
+#if defined(__linux__) || defined(__FreeBSD__)
+  struct {
+    acl_t a;
+    acl_t d;
+  } posix;
+#endif
+#if defined(__linux__)
+  struct {
+    unsigned char *b;
+    ssize_t s;
+  } nfs4;
+#endif
+} ACL;
 
 char *argv0 = "aclcopy";
 
@@ -188,18 +225,24 @@ compare_flagset(acl_flagset_t a,
 }
 #endif
 
-int
-compare_acl(acl_t sa,
-            acl_t da) {
+static int
+_compare_acl(acl_t sa,
+             acl_t da) {
 
     int d = 0;
-#if 1
     acl_entry_t s_e, d_e;
     int i;
 #if defined(ACL_USER) || defined(ACL_GROUP)
     void *vp;
 #endif
 
+
+    if (sa && !da)
+        return 1;
+    if (!sa && da)
+        return -1;
+    if (!sa && !da)
+        return 0;
 
     i = 0;
     do {
@@ -312,20 +355,6 @@ compare_acl(acl_t sa,
         ++i;
     } while (!d);
 
-#else
-    char *ss, *ds;
-
-
-    ss = acl_to_text(sa, NULL);
-    ds = acl_to_text(da, NULL);
-
-    printf("%svs\n%s\n", ss, ds);
-    d = strcmp(ss, ds);
-
-    acl_free(ds);
-    acl_free(ss);
-#endif
-
     return d;
 }
 
@@ -342,12 +371,6 @@ is_valid_name(const char *s) {
     return 1;
 }
 
-typedef struct {
-    int fd;
-    int flags;
-    struct stat sb;
-    char *path;
-} XFD;
 
 
 char *
@@ -526,13 +549,207 @@ acl_strip_np(acl_t a,
 }
 #endif
 
+
+void
+free_acl(ACL *ap) {
+#if defined(__FreeBSD__)
+    if (ap->nfs4) {
+        acl_free(ap->nfs4);
+    }
+#endif
+
+#if defined(__APPLE__)
+    if (ap->ext) {
+        acl_free(ap->ext);
+    }
+#endif
+
+#if defined(__linux__) || defined(__FreeBSD__)
+    if (ap->posix.a) {
+        acl_free(ap->posix.a);
+    }
+    if (ap->posix.d) {
+        acl_free(ap->posix.d);
+    }
+#endif
+
+#if defined(__linux__)
+    if (ap->nfs4.b) {
+        free(ap->nfs4.b);
+    }
+#endif
+
+    memset(ap, 0, sizeof(*ap));
+    free(ap);
+}
+
+ACL *
+get_acl(XFD *xp) {
+    int rc = -1;
+    ACL *ap = malloc(sizeof(*ap));
+
+    if (!ap)
+        return NULL;
+
+    memset(ap, 0, sizeof(*ap));
+
+#if defined(__FreeBSD__)
+    ap->nfs4 = acl_get_fd_np(xp->fd, ACL_TYPE_NFS4);
+    if (ap->nfs4)
+        rc = 0;
+#endif
+
+#if defined(__APPLE__)
+    ap->ext = acl_get_fd_np(xp->fd, ACL_TYPE_EXTENDED);
+    if (ap->ext)
+        rc = 0;
+#endif
+
+#if defined(__linux__) || defined(__FreeBSD__)
+    ap->posix.a = acl_get_fd(xp->fd);
+    if (ap->posix.a)
+        rc = 0;
+    if (S_ISDIR(xp->sb.st_mode))
+        ap->posix.d = acl_get_file(xp->path, ACL_TYPE_DEFAULT);
+    else
+        ap->posix.d = NULL;
+#endif
+
+#if defined(__linux__)
+    ap->nfs4.s = fgetxattr(xp->fd, ACL_NFS4_XATTR, NULL, 0);
+    if (ap->nfs4.s >= 0) {
+        ssize_t len;
+
+        ap->nfs4.b = malloc(ap->nfs4.s+1);
+	if (!ap->nfs4.b) {
+	  fprintf(stderr, "%s: Error: %lu: malloc: %s\n",
+		  argv0, ap->nfs4.s+1, strerror(errno));
+	  exit(1);
+	}
+	
+        while ((len = fgetxattr(xp->fd, ACL_NFS4_XATTR, ap->nfs4.b, ap->nfs4.s+1)) > 0 && len == ap->nfs4.s+1) {
+	  ap->nfs4.s += 1024;
+	  ap->nfs4.b = realloc(ap->nfs4.b, ap->nfs4.s+1);
+	  if (!ap->nfs4.b) {
+	    fprintf(stderr, "%s: Error: %lu: realloc: %s\n",
+		    argv0, ap->nfs4.s+1, strerror(errno));
+	    exit(1);
+	  }
+	}
+        if (len > 0)
+            rc = 0;
+    }
+#endif
+
+    if (rc == 0)
+        return ap;
+
+    free_acl(ap);
+    return NULL;
+}
+
+
+int
+set_acl(XFD *xp,
+        ACL *ap) {
+    int rc = 0;
+
+    /* XXX: Handle ap == NULL */
+
+#if defined(__FreeBSD__)
+    if (ap->nfs4) {
+        if (f_debug)
+	    fprintf(stderr, "** set_acl: Setting NFS4\n");
+        if (acl_set_fd_np(xp->fd, ap->nfs4, ACL_TYPE_NFS4) < 0)
+            rc = -1;
+    }
+#endif
+
+#if defined(__APPLE__)
+    if (ap->ext) {
+        if (acl_set_fd(xp->fd, ap->ext) < 0)
+            rc = -1;
+    }
+#endif
+
+#if defined(__linux__) || defined(__FreeBSD__)
+    if (ap->posix.d && S_ISDIR(xp->sb.st_mode)) {
+        if (f_debug)
+	    fprintf(stderr, "** set_acl: Setting POSIX(default)\n");
+        if (acl_set_file(xp->path, ACL_TYPE_DEFAULT, ap->posix.d) < 0)
+            rc = -1;
+    }
+    if (ap->posix.a) {
+        if (f_debug)
+	    fprintf(stderr, "** set_acl: Setting POSIX(access)\n");
+        if (acl_set_fd(xp->fd, ap->posix.a) < 0)
+            rc = -1;
+    }
+#endif
+
+#if defined(__linux__)
+    if (ap->nfs4.b) {
+        if (f_debug)
+	    fprintf(stderr, "** set_acl: Setting NFS4(xattr)\n");
+        if (fsetxattr(xp->fd, ACL_NFS4_XATTR, ap->nfs4.b, ap->nfs4.s, 0) < 0)
+            rc = -1;
+    }
+#endif
+
+    return rc;
+}
+
+
+int
+cmp_acl(ACL *a,
+        ACL *b) {
+    int rc;
+
+#if defined(__FreeBSD__)
+    rc = _compare_acl(a->nfs4, b->nfs4);
+    if (rc)
+        return rc;
+#endif
+
+#if defined(__APPLE__)
+    rc = _compare_acl(a->ext, b->ext);
+    if (rc)
+        return rc;
+#endif
+
+#if defined(__linux__)
+    /* NFS4 ACLs */
+
+    rc = a->nfs4.s - b->nfs4.s;
+    if (rc)
+        return rc;
+    if (a->nfs4.s > 0) {
+        rc = memcmp(a->nfs4.b, b->nfs4.b, a->nfs4.s);
+        if (rc)
+            return rc;
+    }
+#endif
+
+#if defined(__linux__) || defined(__FreeBSD__)
+    rc = _compare_acl(a->posix.d, b->posix.d);
+    if (rc)
+        return rc;
+    rc = _compare_acl(a->posix.a, b->posix.a);
+    if (rc)
+        return rc;
+#endif
+
+    return 0;
+}
+
+
 int
 copy_acl(XFD *s_dir,
 	 const char *s_name,
          XFD *d_dir,
          const char *d_name,
          int level) {
-    acl_t s_acl, d_acl;
+    ACL *s_acl, *d_acl;
     XFD *s_fd, *d_fd;
     int rc;
 
@@ -608,34 +825,20 @@ copy_acl(XFD *s_dir,
 
 
     /* Update the ACL */
-#ifdef HAVE_ACL_GET_FD_NP
-#ifdef ACL_TYPE_NFS4
-    s_acl = acl_get_fd_np(s_fd->fd, ACL_TYPE_NFS4);
-    d_acl = acl_get_fd_np(d_fd->fd, ACL_TYPE_NFS4);
-#else
-    s_acl = acl_get_fd_np(s_fd->fd, ACL_TYPE_EXTENDED);
-    d_acl = acl_get_fd_np(d_fd->fd, ACL_TYPE_EXTENDED);
-#endif
-#else
-    /* XXX: Handle POSIX.1e default ACL */
-    s_acl = acl_get_fd(s_fd->fd);
-    d_acl = acl_get_fd(d_fd->fd);
-#endif
+    s_acl = get_acl(s_fd);
+    d_acl = get_acl(d_fd);
 
     if (s_acl != NULL && d_acl != NULL) {
         /* Both have ACLs */
-        if (f_force || compare_acl(s_acl, d_acl) != 0) {
+        if (f_force || cmp_acl(s_acl, d_acl) != 0) {
             if (f_update) {
 		if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
 		    perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
 		    exit(1);
 		}
 
-#ifdef HAVE_ACL_SET_FD_NP
-                rc = acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4);
-#else
-                rc = acl_set_fd(d_fd->fd, s_acl);
-#endif
+                rc = set_acl(d_fd, s_acl);
+
                 if (rc < 0) {
 		    perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
                 } else {
@@ -662,11 +865,7 @@ copy_acl(XFD *s_dir,
 		exit(1);
 	    }
 
-#ifdef HAVE_ACL_SET_FD_NP
-            rc = acl_set_fd_np(d_fd->fd, s_acl, ACL_TYPE_NFS4);
-#else
-            rc = acl_set_fd(d_fd->fd, s_acl);
-#endif
+            rc = set_acl(d_fd, s_acl);
             if (rc < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
@@ -685,22 +884,13 @@ copy_acl(XFD *s_dir,
         }
 
     } else if (s_acl == NULL && d_acl != NULL) {
-        acl_t t_acl;
-
-        /* Source does not have ACL, Dest have */
-        t_acl = acl_strip_np(d_acl, 0);
-
         if (f_update) {
 	    if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
 		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
 		exit(1);
 	    }
 
-#ifdef HAVE_ACL_SET_FD_NP
-            rc = acl_set_fd_np(d_fd->fd, t_acl, ACL_TYPE_NFS4);
-#else
-            rc = acl_set_fd(d_fd->fd, t_acl);
-#endif
+            rc = set_acl(d_fd, NULL);
             if (rc < 0) {
 		perror_xfd_exit(d_dir, d_name, "acl_set_fd_np");
             } else {
@@ -717,9 +907,6 @@ copy_acl(XFD *s_dir,
 		printf(": (NOT) Cleared\n");
 	    }
         }
-
-	if (t_acl)
-	    acl_free(t_acl);
     } else {
         /* Neither have ACLs */
     }
