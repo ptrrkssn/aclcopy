@@ -51,6 +51,23 @@
 #ifdef HAVE_SYS_XATTR_H /* Linux */
 #  include <sys/xattr.h>
 #  define ACL_NFS4_XATTR "system.nfs4_acl"
+
+/*
+ * Linux xattr format:
+ *
+ * struct acl {
+ *   u_int32_t ace_c;
+ *   struct ace {
+ *     u_int32_t type;
+ *     u_int32_t flags;
+ *     u_int32_t perms;
+ *     struct utf8str_mixed {
+ *       u_int32_t len;
+ *       char buf[len];
+ *     } id;
+ *   } ace_v[ace_c];
+ * };
+ */
 #endif
 
 
@@ -315,6 +332,9 @@ gacl_free(GACL *ap) {
         return;
 
     switch (ap->type) {
+    case GACL_TYPE_NONE:
+        break;
+
     case GACL_TYPE_POSIX:
 #if defined(__linux__) || defined(__FreeBSD__)
         if (ap->impl.posix.a) {
@@ -348,15 +368,25 @@ gacl_free(GACL *ap) {
 }
 
 GACL *
-gacl_get(int fd,
-	 const char *path) {
+gacl_new(void) {
     GACL *ap = malloc(sizeof(*ap));
-
 
     if (!ap)
         return NULL;
 
     memset(ap, 0, sizeof(*ap));
+    ap->type = GACL_TYPE_NONE;
+
+    return ap;
+}
+
+GACL *
+gacl_get(int fd,
+	 const char *path) {
+    GACL *ap = gacl_new();
+
+    if (!ap)
+        return NULL;
 
 #if defined(__FreeBSD__)
     ap->impl.nfs4 = acl_get_fd_np(fd, ACL_TYPE_NFS4);
@@ -385,6 +415,8 @@ gacl_get(int fd,
     }
 #elif defined(__linux__)
     ap->impl.nfs4.s = fgetxattr(fd, ACL_NFS4_XATTR, NULL, 0);
+    if (ap->impl.nfs4.s < 0 && errno == EBADF)
+        ap->impl.nfs4.s = lgetxattr(path, ACL_NFS4_XATTR, NULL, 0);
     if (ap->impl.nfs4.s >= 0) {
         ssize_t len;
 
@@ -393,11 +425,12 @@ gacl_get(int fd,
 	    return NULL;
 	}
 
-        while ((len = fgetxattr(fd, ACL_NFS4_XATTR, ap->impl.nfs4.b, ap->impl.nfs4.s+1)) > 0 && len == ap->impl.nfs4.s+1) {
+        while ((len = lgetxattr(path, ACL_NFS4_XATTR, ap->impl.nfs4.b, ap->impl.nfs4.s+1)) > 0 && len == ap->impl.nfs4.s+1) {
 	    ap->impl.nfs4.s += 1024;
 	    ap->impl.nfs4.b = realloc(ap->impl.nfs4.b, ap->impl.nfs4.s+1);
 
 	    if (!ap->impl.nfs4.b) {
+                free(ap);
 		return NULL;
 	    }
 	}
@@ -412,6 +445,14 @@ gacl_get(int fd,
 
 #if defined(__linux__) || defined(__FreeBSD__)
     ap->impl.posix.a = acl_get_file(path, ACL_TYPE_ACCESS);
+
+#if defined(HAVE_ACL_EQUIV_MODE)
+    if (ap->impl.posix.a && acl_equiv_mode(ap->imp.posix.a, NULL) == 0) {
+        acl_free(ap->impl.posix.a);
+        ap->impl.posix.a = NULL;
+    }
+#endif
+
     if (ap->impl.posix.a) {
 	ap->type = GACL_TYPE_POSIX;
 	ap->impl.posix.d = acl_get_file(path, ACL_TYPE_DEFAULT);
@@ -429,6 +470,9 @@ gacl_get(int fd,
     }
 #endif
 
+    if (f_debug)
+        fprintf(stderr, "** gacl_get(%s): Got NONE(%s)\n", path, strerror(errno));
+
     gacl_free(ap);
     return NULL;
 }
@@ -443,6 +487,9 @@ gacl_set(int fd,
     /* XXX: Handle ap == NULL */
 
     switch (ap->type) {
+    case GACL_TYPE_NONE:
+        break;
+
     case GACL_TYPE_POSIX:
 #if defined(__linux__) || defined(__FreeBSD__)
 	if (ap->impl.posix.d) {
@@ -503,9 +550,6 @@ gacl_cmp(GACL *a,
     int d;
 
 
-    if (f_debug)
-	fprintf(stderr, "** gacl_cmp(%p, %p)\n", a, b);
-
     if (a && !b)
 	return 1;
     else if (!a && b)
@@ -513,15 +557,14 @@ gacl_cmp(GACL *a,
     else if (!a && !b)
 	return 0;
 
-    if (f_debug)
-	fprintf(stderr, "** gacl_cmp(%p, %p): a->type=%d, b->type=%d\n",
-		a, b, a->type, b->type);
-
     d = a->type - b->type;
     if (d)
 	return d;
 
     switch (a->type) {
+    case GACL_TYPE_NONE:
+        break;
+
     case GACL_TYPE_NFS4:
 #if defined(__FreeBSD__) || defined(__APPLE__)
 	d = _compare_acl(a->impl.nfs4, b->impl.nfs4);

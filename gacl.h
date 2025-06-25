@@ -53,8 +53,9 @@
 
 typedef struct {
     enum {
-	GACL_TYPE_POSIX,
-	GACL_TYPE_NFS4,
+        GACL_TYPE_NONE  = 0,
+	GACL_TYPE_POSIX = 1,
+	GACL_TYPE_NFS4  = 2,
     } type;
     union {
 #if defined(__linux__) || defined(__FreeBSD__)
@@ -73,6 +74,9 @@ typedef struct {
 #endif
     } impl;
 } GACL;
+
+extern GACL *
+gacl_new(void);
 
 extern void
 gacl_free(GACL *ap);

@@ -33,6 +33,8 @@
 
 #include "config.h"
 
+#define _GNU_SOURCE 1
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -194,7 +196,7 @@ xfd_openat(XFD *dxp,
     if (!xp)
 	return NULL;
 
-#if defined(O_PATH) && defined(O_EMPTY_PATH)
+#if defined(O_PATH)
     xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_PATH|O_NOFOLLOW);
 #else
     xp->fd = openat(dxp ? dxp->fd : AT_FDCWD, name, xp->flags = O_RDONLY|O_NOFOLLOW|O_NONBLOCK);
@@ -379,32 +381,48 @@ copy_acl(XFD *s_dir,
     }
 
 
-    if (f_force || gacl_cmp(s_fd->acl, d_fd->acl) != 0) {
-	if (f_update) {
-	    if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
-		perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
-		exit(1);
-	    }
-	    
-	    rc = gacl_set(d_fd->fd, d_fd->path, s_fd->acl);
-	    if (rc < 0) {
-		perror_xfd_exit(d_dir, d_name, "Updating ACL");
-	    } else {
-		n_updated++;
-		if (f_verbose) {
-		    print_xfd2path(stdout, d_dir, d_name);
-		    printf(": Updated\n");
-		}
-	    }
-	} else {
-	    n_updated++;
-	    if (f_verbose) {
-		print_xfd2path(stdout, d_dir, d_name);
-		printf(": (NOT) Updated\n");
-	    }
-	}
+    if (s_fd->acl && !d_fd->acl) {
+        if (f_verbose) {
+            print_xfd2path(stdout, d_dir, d_name);
+            printf(": Skipped (No ACL Support)\n");
+        }
+        goto End;
+    }
+    if (s_fd->acl && d_fd->acl && s_fd->acl->type != d_fd->acl->type) {
+        if (f_verbose) {
+            print_xfd2path(stdout, d_dir, d_name);
+            printf(": Skipped (Incompatible ACL Types)\n");
+        }
+        goto End;
     }
 
+    if (f_force || gacl_cmp(s_fd->acl, d_fd->acl) != 0) {
+        if (f_update) {
+            if (xfd_reopen(d_fd, O_RDONLY|O_NONBLOCK) < 0) {
+                perror_xfd_exit(d_dir, d_name, "Reopening as Normal Descriptor");
+                exit(1);
+            }
+
+            rc = gacl_set(d_fd->fd, d_fd->path, s_fd->acl);
+            if (rc < 0) {
+                perror_xfd_exit(d_dir, d_name, "Updating ACL");
+            } else {
+                n_updated++;
+                if (f_verbose) {
+                    print_xfd2path(stdout, d_dir, d_name);
+                    printf(": Updated\n");
+                }
+            }
+        } else {
+            n_updated++;
+            if (f_verbose) {
+                print_xfd2path(stdout, d_dir, d_name);
+                printf(": (NOT) Updated\n");
+            }
+        }
+    }
+
+ End:
     xfd_close(d_fd);
     xfd_close(s_fd);
 
